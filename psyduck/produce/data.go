@@ -1,7 +1,7 @@
 package produce
 
 import (
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
 type constant struct {
@@ -14,7 +14,7 @@ func constantDefault() *constant {
 	}
 }
 
-func Constant(parse func(interface{}) error) model.Producer {
+func Constant(parse func(interface{}) error) sdk.Producer {
 	config := constantDefault()
 	parse(config)
 

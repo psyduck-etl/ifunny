@@ -1,11 +1,10 @@
 package ifunny
 
 import (
-	"github.com/gastrodon/psyduck/model"
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceFeed(parse func(interface{}) error) model.Producer {
+func produceFeed(parse func(interface{}) error) sdk.Producer {
 	config := mustConfig(parse)
 
 	return func(signal chan string) chan interface{} {

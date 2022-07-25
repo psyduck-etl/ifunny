@@ -1,23 +1,23 @@
 package psyduck
 
 import (
-	"github.com/gastrodon/psyduck/library/psyduck/consume"
-	"github.com/gastrodon/psyduck/library/psyduck/produce"
-	"github.com/gastrodon/psyduck/library/psyduck/transform"
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck-std/psyduck/consume"
+	"github.com/gastrodon/psyduck-std/psyduck/produce"
+	"github.com/gastrodon/psyduck-std/psyduck/transform"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
-func Plugin() *model.Plugin {
-	return &model.Plugin{
+func Plugin() *sdk.Plugin {
+	return &sdk.Plugin{
 		Name: "psyduck",
 
-		ProvideProducer: map[string]model.ProducerProvider{
+		ProvideProducer: map[string]sdk.ProducerProvider{
 			"psyduck-constant": produce.Constant,
 		},
-		ProvideConsumer: map[string]model.ConsumerProvider{
+		ProvideConsumer: map[string]sdk.ConsumerProvider{
 			"psyduck-trash": consume.Trash,
 		},
-		ProvideTransformer: map[string]model.TransformerProvider{
+		ProvideTransformer: map[string]sdk.TransformerProvider{
 			"psyduck-inspect": transform.Inspect,
 		},
 	}

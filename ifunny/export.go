@@ -1,16 +1,16 @@
 package ifunny
 
 import (
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
-func Plugin() *model.Plugin {
-	return &model.Plugin{
+func Plugin() *sdk.Plugin {
+	return &sdk.Plugin{
 		Name: "ifunny",
-		ProvideProducer: map[string]model.ProducerProvider{
+		ProvideProducer: map[string]sdk.ProducerProvider{
 			"ifunny-feed": produceFeed,
 		},
-		ProvideConsumer:    map[string]model.ConsumerProvider{},
-		ProvideTransformer: map[string]model.TransformerProvider{},
+		ProvideConsumer:    map[string]sdk.ConsumerProvider{},
+		ProvideTransformer: map[string]sdk.TransformerProvider{},
 	}
 }

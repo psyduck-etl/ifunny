@@ -1,8 +1,10 @@
 package consume
 
-import "github.com/gastrodon/psyduck/model"
+import (
+	"github.com/gastrodon/psyduck/sdk"
+)
 
-func Trash(parse func(interface{}) error) model.Consumer {
+func Trash(parse func(interface{}) error) sdk.Consumer {
 	return func(signal chan string) chan interface{} {
 		data := make(chan interface{}, 32)
 
