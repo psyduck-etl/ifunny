@@ -3,10 +3,10 @@ package scyther
 import (
 	"time"
 
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceQueue(parse func(interface{}) error) model.Producer {
+func produceQueue(parse func(interface{}) error) sdk.Producer {
 	config := scytherConfigDefault()
 	if err := parse(config); err != nil {
 		panic(err)

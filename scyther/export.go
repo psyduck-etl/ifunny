@@ -1,18 +1,18 @@
 package scyther
 
 import (
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
-func Plugin() *model.Plugin {
-	return &model.Plugin{
+func Plugin() *sdk.Plugin {
+	return &sdk.Plugin{
 		Name: "scyther",
-		ProvideProducer: map[string]model.ProducerProvider{
+		ProvideProducer: map[string]sdk.ProducerProvider{
 			"scyther-read-queue": produceQueue,
 		},
-		ProvideConsumer: map[string]model.ConsumerProvider{
+		ProvideConsumer: map[string]sdk.ConsumerProvider{
 			"scyther-write-queue": consumeQueue,
 		},
-		ProvideTransformer: map[string]model.TransformerProvider{},
+		ProvideTransformer: map[string]sdk.TransformerProvider{},
 	}
 }

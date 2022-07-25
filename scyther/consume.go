@@ -1,10 +1,10 @@
 package scyther
 
 import (
-	"github.com/gastrodon/psyduck/model"
+	"github.com/gastrodon/psyduck/sdk"
 )
 
-func consumeQueue(parse func(interface{}) error) model.Consumer {
+func consumeQueue(parse func(interface{}) error) sdk.Consumer {
 	config := scytherConfigDefault()
 	if err := parse(config); err != nil {
 		panic(err)
