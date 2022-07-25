@@ -1,9 +1,9 @@
 package std
 
 import (
-	"github.com/gastrodon/psyduck-stdlib/ifunny"
-	"github.com/gastrodon/psyduck-stdlib/psyduck"
-	"github.com/gastrodon/psyduck-stdlib/scyther"
+	"github.com/gastrodon/psyduck-std/ifunny"
+	"github.com/gastrodon/psyduck-std/psyduck"
+	"github.com/gastrodon/psyduck-std/scyther"
 )
 
 var IFunny = ifunny.Plugin
