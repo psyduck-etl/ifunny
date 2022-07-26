@@ -22,6 +22,12 @@ func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {
 	return config
 }
 
+func MarshalString(parse func(interface{}) error) sdk.Transformer {
+	return func(data interface{}) interface{} {
+		return string(data.([]byte))
+	}
+}
+
 func MarshalJSON(parse func(interface{}) error) sdk.Transformer {
 	return func(data interface{}) interface{} {
 		dataBytes, err := json.Marshal(data)
@@ -37,9 +43,14 @@ func JSONSnippet(parse func(interface{}) error) sdk.Transformer {
 	config := mustSnippetConfig(parse)
 
 	return func(data interface{}) interface{} {
-		items := make(map[string]interface{}, len(config.Fields))
-		if err := json.Unmarshal([]byte(data.(string)), &items); err != nil {
+		source := map[string]interface{}{}
+		if err := json.Unmarshal([]byte(data.(string)), &source); err != nil {
 			panic(err)
+		}
+
+		items := make(map[string]interface{}, len(config.Fields))
+		for _, field := range config.Fields {
+			items[field] = source[field]
 		}
 
 		dataBytes, err := json.Marshal(items)
