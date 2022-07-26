@@ -31,7 +31,7 @@ func Snippet(parse func(interface{}) error) sdk.Transformer {
 			panic(fmt.Errorf("data is nil"))
 		}
 
-		source := map[string]interface{}{}
+		source := make(map[string]interface{})
 		if err := json.Unmarshal(data, &source); err != nil {
 			panic(err)
 		}

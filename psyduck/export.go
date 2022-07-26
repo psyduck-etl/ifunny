@@ -20,6 +20,7 @@ func Plugin() *sdk.Plugin {
 		ProvideTransformer: map[string]sdk.TransformerProvider{
 			"psyduck-inspect": transform.Inspect,
 			"psyduck-snippet": transform.Snippet,
+			"psyduck-zoom":    transform.Zoom,
 		},
 	}
 }
