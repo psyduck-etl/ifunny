@@ -4,26 +4,26 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func consumeQueue(parse func(interface{}) error) sdk.Consumer {
+func consumeQueue(parse func(interface{}) error) (sdk.Consumer, error) {
 	config := scytherConfigDefault()
 	if err := parse(config); err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	ensureQueue(config)
+	if err := ensureQueue(config); err != nil {
+		return nil, err
+	}
 
-	return func(signal chan string) chan []byte {
+	return func(signal chan string) (chan []byte, error) {
 		data := make(chan []byte, 32)
-		next := func(data []byte) bool {
-			putQueueHead(config, data)
-
-			return true
+		next := func(data []byte) (bool, error) {
+			return true, putQueueHead(config, data)
 		}
 
 		go func() {
 			sdk.ConsumeChunk(next, parse, data, signal)
 		}()
 
-		return data
-	}
+		return data, nil
+	}, nil
 }

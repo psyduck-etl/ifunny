@@ -2,7 +2,7 @@ package transform
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"github.com/gastrodon/psyduck/sdk"
 )
@@ -23,17 +23,17 @@ func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {
 	return config
 }
 
-func Snippet(parse func(interface{}) error) sdk.Transformer {
+func Snippet(parse func(interface{}) error) (sdk.Transformer, error) {
 	config := mustSnippetConfig(parse)
 
-	return func(data []byte) []byte {
+	return func(data []byte) ([]byte, error) {
 		if data == nil {
-			panic(fmt.Errorf("data is nil"))
+			return nil, errors.New("data is nil")
 		}
 
 		source := make(map[string]interface{})
 		if err := json.Unmarshal(data, &source); err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		items := make(map[string]interface{}, len(config.Fields))
@@ -43,9 +43,9 @@ func Snippet(parse func(interface{}) error) sdk.Transformer {
 
 		dataBytes, err := json.Marshal(items)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		return dataBytes
-	}
+		return dataBytes, nil
+	}, nil
 }

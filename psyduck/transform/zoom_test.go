@@ -31,7 +31,17 @@ func TestZoom(test *testing.T) {
 			return nil
 		}
 
-		if zoomed := Zoom(parse)(testcase.Source); !sdk.SameBytes(zoomed, testcase.Want) {
+		transformer, err := Zoom(parse)
+		if err != nil {
+			test.Fatal(err)
+		}
+
+		zoomed, err := transformer(testcase.Source)
+		if err != nil {
+			test.Fatal(err)
+		}
+
+		if !sdk.SameBytes(zoomed, testcase.Want) {
 			test.Fatalf("zoomed does not match #%d! \nzoomed: %s\nwant:%s", index, zoomed, testcase.Want)
 		}
 	}

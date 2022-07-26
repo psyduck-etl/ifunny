@@ -2,7 +2,7 @@ package transform
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"github.com/gastrodon/psyduck/sdk"
 )
@@ -28,19 +28,19 @@ func mustZoomConfig(parse func(interface{}) error) *ZoomConfig {
 	return config
 }
 
-func Zoom(parse func(interface{}) error) sdk.Transformer {
+func Zoom(parse func(interface{}) error) (sdk.Transformer, error) {
 	config := mustZoomConfig(parse)
 
-	return func(data []byte) []byte {
+	return func(data []byte) ([]byte, error) {
 		if data == nil {
-			panic(fmt.Errorf("data is nil"))
+			return nil, errors.New("data is nil")
 		}
 
 		source := make(map[string]ZoomTarget)
 		if err := json.Unmarshal(data, &source); err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		return source[config.Field]
-	}
+		return source[config.Field], nil
+	}, nil
 }

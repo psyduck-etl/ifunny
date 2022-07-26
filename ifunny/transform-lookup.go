@@ -6,35 +6,40 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func lookup(looker func(string) interface{}) sdk.Transformer {
-	return func(data []byte) []byte {
+func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
+	return func(data []byte) ([]byte, error) {
 		who := new(Identity)
 		if err := json.Unmarshal(data, who); err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		foundBytes, err := json.Marshal(looker(who.ID))
+		found, err := looker(who.ID)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		return foundBytes
-	}
+		foundBytes, err := json.Marshal(found)
+		if err != nil {
+			return nil, err
+		}
+
+		return foundBytes, nil
+	}, nil
 }
 
-func lookupContent(parse func(interface{}) error) sdk.Transformer {
+func lookupContent(parse func(interface{}) error) (sdk.Transformer, error) {
 	config := mustConfig(parse)
 
-	return lookup(func(id string) interface{} {
+	return lookup(func(id string) (interface{}, error) {
 		return getContent(config, id)
 	})
 
 }
 
-func lookupUser(parse func(interface{}) error) sdk.Transformer {
+func lookupUser(parse func(interface{}) error) (sdk.Transformer, error) {
 	config := mustConfig(parse)
 
-	return lookup(func(id string) interface{} {
+	return lookup(func(id string) (interface{}, error) {
 		return getUser(config, id)
 	})
 }

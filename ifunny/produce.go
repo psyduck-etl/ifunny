@@ -6,10 +6,10 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceFeed(parse func(interface{}) error) sdk.Producer {
+func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 	config := mustConfig(parse)
 
-	return func(signal chan string) chan []byte {
+	return func(signal chan string) (chan []byte, error) {
 		data := make(chan []byte, 32)
 
 		go func() {
@@ -17,23 +17,27 @@ func produceFeed(parse func(interface{}) error) sdk.Producer {
 			nextPage := ""
 
 			for {
-				page := getFeedPage(config, nextPage)
+				page, err := getFeedPage(config, nextPage)
+				if err != nil {
+					panic(err)
+				}
+
 				nextPage = page.Paging.Cursors.Next
 				pageSize := len(page.Items)
 				pageIndex := 0
 
-				next := func() ([]byte, bool) {
+				next := func() ([]byte, bool, error) {
 					if pageIndex == pageSize {
-						return nil, false
+						return nil, false, nil
 					}
 
 					pageItemBytes, err := json.Marshal(page.Items[pageIndex])
 					if err != nil {
-						panic(err)
+						return nil, false, err
 					}
 
 					pageIndex++
-					return pageItemBytes, true
+					return pageItemBytes, true, nil
 				}
 
 				sdk.ProduceChunk(next, parse, data, signal)
@@ -45,6 +49,6 @@ func produceFeed(parse func(interface{}) error) sdk.Producer {
 			}
 		}()
 
-		return data
-	}
+		return data, nil
+	}, nil
 }
