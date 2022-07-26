@@ -2,6 +2,7 @@ package transform
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/gastrodon/psyduck/sdk"
 )
@@ -26,6 +27,10 @@ func Snippet(parse func(interface{}) error) sdk.Transformer {
 	config := mustSnippetConfig(parse)
 
 	return func(data []byte) []byte {
+		if data == nil {
+			panic(fmt.Errorf("data is nil"))
+		}
+
 		source := map[string]interface{}{}
 		if err := json.Unmarshal(data, &source); err != nil {
 			panic(err)
