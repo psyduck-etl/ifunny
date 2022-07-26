@@ -18,8 +18,9 @@ func Plugin() *sdk.Plugin {
 			"psyduck-trash": consume.Trash,
 		},
 		ProvideTransformer: map[string]sdk.TransformerProvider{
-			"psyduck-inspect":     transform.Inspect,
-			"psyduck-json-string": transform.MarshalJSON,
+			"psyduck-inspect":      transform.Inspect,
+			"psyduck-json":         transform.MarshalJSON,
+			"psyduck-json-snippet": transform.JSONSnippet,
 		},
 	}
 }
