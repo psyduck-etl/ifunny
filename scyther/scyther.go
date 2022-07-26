@@ -9,7 +9,7 @@ import (
 )
 
 type Message struct {
-	Message string `json:"message"`
+	Message []byte `json:"message"`
 }
 
 func queueURL(config *scytherConfig) string {
@@ -31,7 +31,7 @@ func ensureQueue(config *scytherConfig) {
 	response.Body.Close()
 }
 
-func getQueueHead(config *scytherConfig) (string, bool) {
+func getQueueHead(config *scytherConfig) ([]byte, bool) {
 	response, err := http.Get(queueURL(config) + "/head")
 	if err != nil {
 		panic(err)
@@ -39,7 +39,7 @@ func getQueueHead(config *scytherConfig) (string, bool) {
 
 	defer response.Body.Close()
 	if response.StatusCode == 404 {
-		return "", false
+		return nil, false
 	}
 
 	bodyBytes, err := io.ReadAll(response.Body)

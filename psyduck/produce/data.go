@@ -18,8 +18,8 @@ func Constant(parse func(interface{}) error) sdk.Producer {
 	config := constantDefault()
 	parse(config)
 
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+	return func(signal chan string) chan []byte {
+		data := make(chan []byte, 32)
 		alive := make(chan bool, 1)
 		alive <- true
 
@@ -29,7 +29,7 @@ func Constant(parse func(interface{}) error) sdk.Producer {
 				case received := <-signal:
 					panic(received)
 				case <-alive:
-					data <- config.Value
+					data <- []byte(config.Value)
 					alive <- true
 				}
 			}

@@ -5,8 +5,8 @@ import (
 )
 
 func Trash(parse func(interface{}) error) sdk.Consumer {
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+	return func(signal chan string) chan []byte {
+		data := make(chan []byte, 32)
 
 		go func() {
 			for {

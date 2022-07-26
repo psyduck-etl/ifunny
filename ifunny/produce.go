@@ -1,14 +1,16 @@
 package ifunny
 
 import (
+	"encoding/json"
+
 	"github.com/gastrodon/psyduck/sdk"
 )
 
 func produceFeed(parse func(interface{}) error) sdk.Producer {
 	config := mustConfig(parse)
 
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+	return func(signal chan string) chan []byte {
+		data := make(chan []byte, 32)
 
 		go func() {
 			produced := 0
@@ -20,20 +22,25 @@ func produceFeed(parse func(interface{}) error) sdk.Producer {
 				pageSize := len(page.Items)
 				pageIndex := 0
 
-				next := func() (interface{}, bool) {
-					if pageIndex == pageSize || produced+pageIndex == config.StopAfter {
+				next := func() ([]byte, bool) {
+					if pageIndex == pageSize {
 						return nil, false
 					}
 
-					item := page.Items[pageIndex]
+					pageItemBytes, err := json.Marshal(page.Items[pageIndex])
+					if err != nil {
+						panic(err)
+					}
+
 					pageIndex++
-					return item, true
+					return pageItemBytes, true
 				}
 
 				sdk.ProduceChunk(next, parse, data, signal)
 				produced += pageSize
+
 				if config.StopAfter != 0 && produced > config.StopAfter {
-					break
+					return
 				}
 			}
 		}()

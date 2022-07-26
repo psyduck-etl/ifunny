@@ -22,29 +22,12 @@ func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {
 	return config
 }
 
-func MarshalString(parse func(interface{}) error) sdk.Transformer {
-	return func(data interface{}) interface{} {
-		return string(data.([]byte))
-	}
-}
-
-func MarshalJSON(parse func(interface{}) error) sdk.Transformer {
-	return func(data interface{}) interface{} {
-		dataBytes, err := json.Marshal(data)
-		if err != nil {
-			panic(err)
-		}
-
-		return string(dataBytes)
-	}
-}
-
-func JSONSnippet(parse func(interface{}) error) sdk.Transformer {
+func Snippet(parse func(interface{}) error) sdk.Transformer {
 	config := mustSnippetConfig(parse)
 
-	return func(data interface{}) interface{} {
+	return func(data []byte) []byte {
 		source := map[string]interface{}{}
-		if err := json.Unmarshal([]byte(data.(string)), &source); err != nil {
+		if err := json.Unmarshal(data, &source); err != nil {
 			panic(err)
 		}
 

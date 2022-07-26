@@ -7,7 +7,7 @@ import (
 )
 
 func Inspect(parse func(interface{}) error) sdk.Transformer {
-	return func(data interface{}) interface{} {
+	return func(data []byte) []byte {
 		fmt.Println(data)
 		return data
 	}

@@ -1,29 +1,35 @@
 package ifunny
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/gastrodon/psyduck/sdk"
 )
 
 func getContentAuthor(parse func(interface{}) error) sdk.Transformer {
-	return func(contentRaw interface{}) interface{} {
-		content, ok := contentRaw.(Content)
-		if !ok {
-			panic(fmt.Errorf("%#v isn't a Content", contentRaw))
+	return func(data []byte) []byte {
+		content := new(Content)
+		if err := json.Unmarshal(data, content); err != nil {
+			panic(fmt.Errorf("can't unmarshal bytes %v as Content: %s", data, err))
 		}
 
-		return content.Creator
+		creatorBytes, err := json.Marshal(content.Creator)
+		if err != nil {
+			panic(err)
+		}
+
+		return creatorBytes
 	}
 }
 
 func getItemID(parse func(interface{}) error) sdk.Transformer {
-	return func(data interface{}) interface{} {
-		haver, ok := data.(IDHaver)
-		if !ok {
-			panic(fmt.Errorf("%#v isn't an IDHaver", data))
+	return func(data []byte) []byte {
+		identity := new(Identity)
+		if err := json.Unmarshal(data, identity); err != nil {
+			panic(fmt.Errorf("can't unmarshal bytes %v as Identity: %s", data, err))
 		}
 
-		return haver.GetID()
+		return []byte(identity.ID)
 	}
 }

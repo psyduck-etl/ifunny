@@ -12,12 +12,12 @@ func consumeQueue(parse func(interface{}) error) sdk.Consumer {
 
 	ensureQueue(config)
 
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+	return func(signal chan string) chan []byte {
+		data := make(chan []byte, 32)
 
 		go func() {
 			for each := range data {
-				putQueueHead(config, []byte(each.(string)))
+				putQueueHead(config, each)
 			}
 		}()
 
