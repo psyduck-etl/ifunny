@@ -9,8 +9,9 @@ import (
 func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 	config := mustConfig(parse)
 
-	return func(signal chan string) (chan []byte, error) {
+	return func(signal chan string) (chan []byte, chan error) {
 		data := make(chan []byte, 32)
+		errors := make(chan error)
 
 		go func() {
 			produced := 0
@@ -19,7 +20,8 @@ func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 			for {
 				page, err := getFeedPage(config, nextPage)
 				if err != nil {
-					panic(err)
+					errors <- err
+					return
 				}
 
 				nextPage = page.Paging.Cursors.Next
@@ -40,7 +42,7 @@ func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 					return pageItemBytes, true, nil
 				}
 
-				sdk.ProduceChunk(next, parse, data, signal)
+				sdk.ProduceChunk(next, parse, data, errors, signal)
 				produced += pageSize
 
 				if config.StopAfter != 0 && produced > config.StopAfter {
@@ -49,6 +51,6 @@ func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 			}
 		}()
 
-		return data, nil
+		return data, errors
 	}, nil
 }
