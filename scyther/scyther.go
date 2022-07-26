@@ -9,14 +9,14 @@ import (
 )
 
 type Message struct {
-	Message []byte `json:"message"`
+	Message string `json:"message"`
 }
 
-func queueURL(config *scytherConfig) string {
+func queueURL(config *ScytherConfig) string {
 	return fmt.Sprintf("%s/queues/%s", config.URL, config.Queue)
 }
 
-func ensureQueue(config *scytherConfig) {
+func ensureQueue(config *ScytherConfig) {
 	body := map[string]string{"name": config.Queue}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -31,7 +31,7 @@ func ensureQueue(config *scytherConfig) {
 	response.Body.Close()
 }
 
-func getQueueHead(config *scytherConfig) ([]byte, bool) {
+func getQueueHead(config *ScytherConfig) ([]byte, bool) {
 	response, err := http.Get(queueURL(config) + "/head")
 	if err != nil {
 		panic(err)
@@ -52,10 +52,10 @@ func getQueueHead(config *scytherConfig) ([]byte, bool) {
 		panic(err)
 	}
 
-	return message.Message, true
+	return []byte(message.Message), message.Message != ""
 }
 
-func putQueueHead(config *scytherConfig, each []byte) {
+func putQueueHead(config *ScytherConfig, each []byte) {
 	body := bytes.NewReader(each)
 	request, err := http.NewRequest("PUT", queueURL(config), body)
 	if err != nil {
