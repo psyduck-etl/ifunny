@@ -10,7 +10,10 @@ func Plugin() *sdk.Plugin {
 		ProvideProducer: map[string]sdk.ProducerProvider{
 			"ifunny-feed": produceFeed,
 		},
-		ProvideConsumer:    map[string]sdk.ConsumerProvider{},
-		ProvideTransformer: map[string]sdk.TransformerProvider{},
+		ProvideConsumer: map[string]sdk.ConsumerProvider{},
+		ProvideTransformer: map[string]sdk.TransformerProvider{
+			"ifunny-content-author": getContentAuthor,
+			"ifunny-id":             getItemID,
+		},
 	}
 }
