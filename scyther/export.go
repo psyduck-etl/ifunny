@@ -8,10 +8,10 @@ func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
 		Name: "scyther",
 		ProvideProducer: map[string]sdk.ProducerProvider{
-			"scyther-read-queue": produceQueue,
+			"scyther-pull": produceQueue,
 		},
 		ProvideConsumer: map[string]sdk.ConsumerProvider{
-			"scyther-write-queue": consumeQueue,
+			"scyther-push": consumeQueue,
 		},
 		ProvideTransformer: map[string]sdk.TransformerProvider{},
 	}
