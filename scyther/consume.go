@@ -14,11 +14,14 @@ func consumeQueue(parse func(interface{}) error) sdk.Consumer {
 
 	return func(signal chan string) chan []byte {
 		data := make(chan []byte, 32)
+		next := func(data []byte) bool {
+			putQueueHead(config, data)
+
+			return true
+		}
 
 		go func() {
-			for each := range data {
-				putQueueHead(config, each)
-			}
+			sdk.ConsumeChunk(next, parse, data, signal)
 		}()
 
 		return data
