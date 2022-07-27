@@ -46,7 +46,7 @@ func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 				produced += pageSize
 
 				if config.StopAfter != 0 && produced > config.StopAfter {
-					return
+					break
 				}
 			}
 
