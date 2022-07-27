@@ -14,7 +14,7 @@ func consumeQueue(parse func(interface{}) error) (sdk.Consumer, error) {
 		return nil, err
 	}
 
-	return func(signal chan string) (chan []byte, chan error) {
+	return func(signal chan string, done func()) (chan []byte, chan error) {
 		data := make(chan []byte, 32)
 		errors := make(chan error)
 
@@ -24,6 +24,7 @@ func consumeQueue(parse func(interface{}) error) (sdk.Consumer, error) {
 
 		go func() {
 			sdk.ConsumeChunk(next, parse, data, errors, signal)
+			done()
 		}()
 
 		return data, errors

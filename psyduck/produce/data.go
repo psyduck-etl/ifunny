@@ -18,7 +18,7 @@ func Constant(parse func(interface{}) error) (sdk.Producer, error) {
 	config := constantDefault()
 	parse(config)
 
-	return func(signal chan string) (chan []byte, chan error) {
+	return func(signal chan string, done func()) (chan []byte, chan error) {
 		data := make(chan []byte, 32)
 		alive := make(chan bool, 1)
 		alive <- true
@@ -33,6 +33,8 @@ func Constant(parse func(interface{}) error) (sdk.Producer, error) {
 					alive <- true
 				}
 			}
+
+			done()
 		}()
 
 		return data, nil
