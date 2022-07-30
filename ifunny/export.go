@@ -17,6 +17,13 @@ func Plugin() *sdk.Plugin {
 				Name:            "ifunny-feed",
 				ProvideProducer: produceFeed,
 				Spec: hcldec.ObjectSpec{
+					"exit-on-error": sdk.SpecExitOnError(true),
+					"per-minute":    sdk.SpecPerMinute(15),
+					"feed": &hcldec.AttrSpec{
+						Name:     "feed",
+						Type:     cty.String,
+						Required: true,
+					},
 					"bearer-token": &hcldec.AttrSpec{
 						Name:     "bearer-token",
 						Type:     cty.String,

@@ -16,6 +16,8 @@ func Plugin() *sdk.Plugin {
 				ProvideProducer: produceQueue,
 				ProvideConsumer: consumeQueue,
 				Spec: hcldec.ObjectSpec{
+					"exit-on-error": sdk.SpecExitOnError(true),
+					"per-minute":    sdk.SpecPerMinute(512),
 					"url": &hcldec.AttrSpec{
 						Name:     "url",
 						Type:     cty.String,
