@@ -10,17 +10,32 @@ import (
 func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
 		Name: "psyduck",
-
-		ProvideProducer: map[string]sdk.ProducerProvider{
-			"psyduck-constant": produce.Constant,
-		},
-		ProvideConsumer: map[string]sdk.ConsumerProvider{
-			"psyduck-trash": consume.Trash,
-		},
-		ProvideTransformer: map[string]sdk.TransformerProvider{
-			"psyduck-inspect": transform.Inspect,
-			"psyduck-snippet": transform.Snippet,
-			"psyduck-zoom":    transform.Zoom,
+		Resources: []*sdk.Resource{
+			&sdk.Resource{
+				Name:            "psyduck-constant",
+				Kinds:           sdk.PRODUCER,
+				ProvideProducer: produce.Constant,
+			},
+			&sdk.Resource{
+				Name:            "psyduck-trash",
+				Kinds:           sdk.CONSUMER,
+				ProvideConsumer: consume.Trash,
+			},
+			&sdk.Resource{
+				Name:               "psyduck-inspect",
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: transform.Inspect,
+			},
+			&sdk.Resource{
+				Name:               "psyduck-snippet",
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: transform.Snippet,
+			},
+			&sdk.Resource{
+				Name:               "psyduck-zoom",
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: transform.Zoom,
+			},
 		},
 	}
 }

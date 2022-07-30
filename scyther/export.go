@@ -7,12 +7,13 @@ import (
 func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
 		Name: "scyther",
-		ProvideProducer: map[string]sdk.ProducerProvider{
-			"scyther-pull": produceQueue,
+		Resources: []*sdk.Resource{
+			&sdk.Resource{
+				Name:            "scyther-queue",
+				Kinds:           sdk.PRODUCER | sdk.CONSUMER,
+				ProvideProducer: produceQueue,
+				ProvideConsumer: consumeQueue,
+			},
 		},
-		ProvideConsumer: map[string]sdk.ConsumerProvider{
-			"scyther-push": consumeQueue,
-		},
-		ProvideTransformer: map[string]sdk.TransformerProvider{},
 	}
 }
