@@ -1,11 +1,11 @@
 package scyther
 
 type ScytherConfig struct {
-	URL              string `psy:"url"`
-	Queue            string `psy:"queue"`
-	StopIfExhausted  bool   `psy:"stop-if-exhausted"`
-	DelayIfExhausted int    `psy:"delay-if-exhausted"` // time.Duration?
-	PerMinute        int    `psy:"per-minute"`
+	URL              string `cty:"url"`
+	Queue            string `cty:"queue"`
+	StopIfExhausted  bool   `cty:"stop-if-exhausted"`
+	DelayIfExhausted int    `cty:"delay-if-exhausted"` // time.Duration?
+	PerMinute        int    `cty:"per-minute"`
 }
 
 func scytherConfigDefault() *ScytherConfig {

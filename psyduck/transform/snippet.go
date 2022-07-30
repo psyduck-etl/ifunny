@@ -8,7 +8,7 @@ import (
 )
 
 type SnippetConfig struct {
-	Fields []string `yaml:"fields"`
+	Fields []string `cty:"fields"`
 }
 
 func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {

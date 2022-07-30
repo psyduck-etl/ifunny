@@ -7,7 +7,7 @@ import (
 )
 
 type InspectConfig struct {
-	BeString bool `psy:"be-string"`
+	BeString bool `cty:"be-string"`
 }
 
 func mustInspectConfig(parse func(interface{}) error) *InspectConfig {

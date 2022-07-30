@@ -5,7 +5,7 @@ import (
 )
 
 type constant struct {
-	Value string `psy:"value"`
+	Value string `cty:"value"`
 }
 
 func constantDefault() *constant {

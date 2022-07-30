@@ -1,12 +1,12 @@
 package ifunny
 
 type IFunnyConfig struct {
-	BearerToken string `psy:"bearer-token"`
-	UserAgent   string `psy:"user-agent"`
-	APIRoot     string `psy:"api-root"`
+	BearerToken string `cty:"bearer-token"`
+	UserAgent   string `cty:"user-agent"`
+	APIRoot     string `cty:"api-root"`
 
-	Feed      string `psy:"feed"`
-	StopAfter int    `psy:"stop-after"`
+	Feed      string `cty:"feed"`
+	StopAfter int    `cty:"stop-after"`
 }
 
 func mustConfig(parse func(interface{}) error) *IFunnyConfig {
