@@ -10,11 +10,8 @@ type InspectConfig struct {
 	BeString bool `cty:"be-string"`
 }
 
-func mustInspectConfig(parse func(interface{}) error) *InspectConfig {
-	config := &InspectConfig{
-		BeString: true,
-	}
-
+func mustInspectConfig(parse sdk.Parser) *InspectConfig {
+	config := new(InspectConfig)
 	if err := parse(config); err != nil {
 		panic(err)
 	}
@@ -22,7 +19,7 @@ func mustInspectConfig(parse func(interface{}) error) *InspectConfig {
 	return config
 }
 
-func Inspect(parse func(interface{}) error) (sdk.Transformer, error) {
+func Inspect(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	formatter := func(data []byte) interface{} { return data }
 
 	config := mustInspectConfig(parse)

@@ -6,7 +6,7 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceQueue(parse func(interface{}) error) (sdk.Producer, error) {
+func produceQueue(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
 	config := mustScytherConfig(parse)
 	if err := ensureQueue(config); err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func produceQueue(parse func(interface{}) error) (sdk.Producer, error) {
 		}
 
 		go func() {
-			sdk.ProduceChunk(next, parse, data, errors, signal)
+			sdk.ProduceChunk(next, specParse, data, errors, signal)
 			done()
 		}()
 

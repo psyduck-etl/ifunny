@@ -5,7 +5,6 @@ import (
 	"github.com/gastrodon/psyduck-std/psyduck/produce"
 	"github.com/gastrodon/psyduck-std/psyduck/transform"
 	"github.com/gastrodon/psyduck/sdk"
-	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
 )
 
@@ -17,16 +16,18 @@ func Plugin() *sdk.Plugin {
 				Name:            "psyduck-constant",
 				Kinds:           sdk.PRODUCER,
 				ProvideProducer: produce.Constant,
-				Spec: hcldec.ObjectSpec{
-					"value": &hcldec.DefaultSpec{
-						Primary: &hcldec.AttrSpec{
-							Name:     "value",
-							Type:     cty.String,
-							Required: false,
-						},
-						Default: &hcldec.LiteralSpec{
-							Value: cty.StringVal("0"),
-						},
+				Spec: sdk.SpecMap{
+					"value": &sdk.Spec{
+						Name:        "value",
+						Description: "constant value to produce",
+						Type:        sdk.String,
+						Default:     cty.StringVal("0"),
+					},
+					"stop-after": &sdk.Spec{
+						Name:        "stop-after",
+						Description: "stop after n iterations",
+						Type:        sdk.Integer,
+						Default:     cty.NumberIntVal(0),
 					},
 				},
 			},
@@ -39,16 +40,12 @@ func Plugin() *sdk.Plugin {
 				Name:               "psyduck-inspect",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Inspect,
-				Spec: hcldec.ObjectSpec{
-					"be-string": &hcldec.DefaultSpec{
-						Primary: &hcldec.AttrSpec{
-							Name:     "be-string",
-							Type:     cty.String,
-							Required: false,
-						},
-						Default: &hcldec.LiteralSpec{
-							Value: cty.BoolVal(true),
-						},
+				Spec: sdk.SpecMap{
+					"be-string": &sdk.Spec{
+						Name:        "be-string",
+						Description: "should the data bytes should be a string",
+						Type:        sdk.Bool,
+						Default:     cty.BoolVal(true),
 					},
 				},
 			},
@@ -56,11 +53,12 @@ func Plugin() *sdk.Plugin {
 				Name:               "psyduck-snippet",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Snippet,
-				Spec: hcldec.ObjectSpec{
-					"fields": &hcldec.AttrSpec{
-						Name:     "fields",
-						Type:     cty.List(cty.String),
-						Required: true,
+				Spec: sdk.SpecMap{
+					"fields": &sdk.Spec{
+						Name:        "fields",
+						Description: "fields to take a snippet of",
+						Type:        sdk.List(sdk.String),
+						Required:    true,
 					},
 				},
 			},
@@ -68,11 +66,12 @@ func Plugin() *sdk.Plugin {
 				Name:               "psyduck-zoom",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Zoom,
-				Spec: hcldec.ObjectSpec{
-					"fields": &hcldec.AttrSpec{
-						Name:     "field",
-						Type:     cty.String,
-						Required: true,
+				Spec: sdk.SpecMap{
+					"field": &sdk.Spec{
+						Name:        "field",
+						Description: "field to zoom into",
+						Type:        sdk.String,
+						Required:    true,
 					},
 				},
 			},

@@ -19,8 +19,8 @@ func (me *ZoomTarget) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func mustZoomConfig(parse func(interface{}) error) *ZoomConfig {
-	config := &ZoomConfig{}
+func mustZoomConfig(parse sdk.Parser) *ZoomConfig {
+	config := new(ZoomConfig)
 	if err := parse(config); err != nil {
 		panic(err)
 	}
@@ -28,7 +28,7 @@ func mustZoomConfig(parse func(interface{}) error) *ZoomConfig {
 	return config
 }
 
-func Zoom(parse func(interface{}) error) (sdk.Transformer, error) {
+func Zoom(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	config := mustZoomConfig(parse)
 
 	return func(data []byte) ([]byte, error) {
