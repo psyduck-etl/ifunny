@@ -2,7 +2,6 @@ package scyther
 
 import (
 	"github.com/gastrodon/psyduck/sdk"
-	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
 )
 
@@ -15,38 +14,32 @@ func Plugin() *sdk.Plugin {
 				Kinds:           sdk.PRODUCER | sdk.CONSUMER,
 				ProvideProducer: produceQueue,
 				ProvideConsumer: consumeQueue,
-				Spec: hcldec.ObjectSpec{
-					"exit-on-error": sdk.SpecExitOnError(true),
-					"per-minute":    sdk.SpecPerMinute(512),
-					"url": &hcldec.AttrSpec{
-						Name:     "url",
-						Type:     cty.String,
-						Required: true,
+				Spec: sdk.SpecMap{
+					"url": &sdk.Spec{
+						Name:        "url",
+						Description: "scyther host url",
+						Type:        sdk.String,
+						Required:    true,
 					},
-					"queue": &hcldec.AttrSpec{
-						Name:     "queue",
-						Type:     cty.String,
-						Required: true,
+					"queue": &sdk.Spec{
+						Name:        "queue",
+						Description: "queue to read/write + ensure exists",
+						Type:        sdk.String,
+						Required:    true,
 					},
-					"delay-if-exhausted": &hcldec.DefaultSpec{
-						Primary: &hcldec.AttrSpec{
-							Name:     "delay-if-exhausted",
-							Type:     cty.Number,
-							Required: false,
-						},
-						Default: &hcldec.LiteralSpec{
-							Value: cty.NumberIntVal(500),
-						},
+					"stop-if-exhausted": &sdk.Spec{
+						Name:        "stop-if-exhausted",
+						Description: "stop producing if our queue is empty",
+						Type:        sdk.Bool,
+						Required:    false,
+						Default:     cty.BoolVal(false),
 					},
-					"stop-if-exhausted": &hcldec.DefaultSpec{
-						Primary: &hcldec.AttrSpec{
-							Name:     "stop-if-exhausted",
-							Type:     cty.Bool,
-							Required: false,
-						},
-						Default: &hcldec.LiteralSpec{
-							Value: cty.BoolVal(true),
-						},
+					"delay-if-exhausted": &sdk.Spec{
+						Name:        "delay-if-exhausted",
+						Description: "how long to wait before retrying an empty queue",
+						Type:        sdk.Integer,
+						Required:    false,
+						Default:     cty.NumberIntVal(1_000),
 					},
 				},
 			},
