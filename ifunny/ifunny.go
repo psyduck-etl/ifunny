@@ -2,6 +2,7 @@ package ifunny
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"io"
 	"net/http"
@@ -30,6 +31,14 @@ func getFeedPage(config *IFunnyConfig, nextPage string) (*FeedPage, error) {
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return nil, err
+	}
+
+	if response.StatusCode != 200 {
+		if nextPage != "" {
+			return nil, fmt.Errorf("got %d getting the feed %s[%s]", response.StatusCode, config.Feed, nextPage)
+		}
+
+		return nil, fmt.Errorf("got %d getting the feed %s[<root>]", response.StatusCode, config.Feed)
 	}
 
 	bodyBytes, err := io.ReadAll(response.Body)

@@ -27,7 +27,7 @@ func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
 	}, nil
 }
 
-func lookupContent(parse func(interface{}) error) (sdk.Transformer, error) {
+func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	config := mustConfig(parse)
 
 	return lookup(func(id string) (interface{}, error) {
@@ -36,7 +36,7 @@ func lookupContent(parse func(interface{}) error) (sdk.Transformer, error) {
 
 }
 
-func lookupUser(parse func(interface{}) error) (sdk.Transformer, error) {
+func lookupUser(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	config := mustConfig(parse)
 
 	return lookup(func(id string) (interface{}, error) {
