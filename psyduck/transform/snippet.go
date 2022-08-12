@@ -8,7 +8,7 @@ import (
 )
 
 type SnippetConfig struct {
-	Fields []string `cty:"fields"`
+	Fields []string `psy:"fields"`
 }
 
 func mustSnippetConfig(parse sdk.Parser) *SnippetConfig {
