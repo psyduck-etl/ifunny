@@ -28,9 +28,7 @@ func Inspect(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	}
 
 	return func(data []byte) ([]byte, error) {
-		fmt.Println("should print")
-		_ = formatter
-		// fmt.Println(formatter(data))
+		fmt.Println(formatter(data))
 
 		return data, nil
 	}, nil
