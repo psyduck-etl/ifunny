@@ -12,7 +12,7 @@ func produceQueue(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, err
 		return nil, err
 	}
 
-	return func(signal sdk.Signal, done func()) (chan []byte, chan error) {
+	return func() (chan []byte, chan error) {
 		data := make(chan []byte, 32)
 		errors := make(chan error)
 
@@ -27,8 +27,9 @@ func produceQueue(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, err
 		}
 
 		go func() {
-			sdk.ProduceChunk(next, specParse, data, errors, signal)
-			done()
+			sdk.ProduceChunk(next, specParse, data, errors)
+			close(data)
+			close(errors)
 		}()
 
 		return data, errors

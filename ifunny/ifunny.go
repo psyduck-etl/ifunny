@@ -21,7 +21,13 @@ func mustIFunnyRequest(config *IFunnyConfig, method, path string, body io.Reader
 }
 
 func getFeedPage(config *IFunnyConfig, nextPage string) (*FeedPage, error) {
-	request := mustIFunnyRequest(config, "GET", "/feeds/"+config.Feed, nil)
+	method := "GET"
+	if config.Feed == "collective" {
+		// eye roll emoji
+		method = "POST"
+	}
+
+	request := mustIFunnyRequest(config, method, "/feeds/"+config.Feed, nil)
 	request.Header.Add("accept", "video/mp4, image/jpeg")
 
 	query := request.URL.Query()
