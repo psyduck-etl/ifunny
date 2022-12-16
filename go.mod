@@ -3,7 +3,7 @@ module github.com/gastrodon/psyduck-std
 go 1.18
 
 require (
-	github.com/gastrodon/psyduck v1.0.0
+	github.com/gastrodon/psyduck v1.1.0
 	github.com/zclconf/go-cty v1.12.1
 )
 

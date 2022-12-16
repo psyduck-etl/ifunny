@@ -12,7 +12,7 @@ func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
 		Name: "psyduck",
 		Resources: []*sdk.Resource{
-			&sdk.Resource{
+			{
 				Name:            "psyduck-constant",
 				Kinds:           sdk.PRODUCER,
 				ProvideProducer: produce.Constant,
@@ -31,12 +31,12 @@ func Plugin() *sdk.Plugin {
 					},
 				},
 			},
-			&sdk.Resource{
+			{
 				Name:            "psyduck-trash",
 				Kinds:           sdk.CONSUMER,
 				ProvideConsumer: consume.Trash,
 			},
-			&sdk.Resource{
+			{
 				Name:               "psyduck-inspect",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Inspect,
@@ -49,7 +49,7 @@ func Plugin() *sdk.Plugin {
 					},
 				},
 			},
-			&sdk.Resource{
+			{
 				Name:               "psyduck-snippet",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Snippet,
@@ -62,7 +62,7 @@ func Plugin() *sdk.Plugin {
 					},
 				},
 			},
-			&sdk.Resource{
+			{
 				Name:               "psyduck-zoom",
 				Kinds:              sdk.TRANSFORMER,
 				ProvideTransformer: transform.Zoom,
