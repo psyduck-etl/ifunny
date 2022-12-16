@@ -1,43 +1,58 @@
 package ifunny
 
 import (
+	"encoding/json"
+
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceFeed(parse func(interface{}) error) sdk.Producer {
+func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
 	config := mustConfig(parse)
 
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+	return func(signal chan string, done func()) (chan []byte, chan error) {
+		data := make(chan []byte, 32)
+		errors := make(chan error)
 
 		go func() {
 			produced := 0
 			nextPage := ""
 
 			for {
-				page := getFeedPage(config, nextPage)
+				page, err := getFeedPage(config, nextPage)
+				if err != nil {
+					errors <- err
+					break
+				}
+
 				nextPage = page.Paging.Cursors.Next
 				pageSize := len(page.Items)
 				pageIndex := 0
 
-				next := func() (interface{}, bool) {
-					if pageIndex == pageSize || produced+pageIndex == config.StopAfter {
-						return nil, false
+				next := func() ([]byte, bool, error) {
+					if pageIndex == pageSize {
+						return nil, false, nil
 					}
 
-					item := page.Items[pageIndex]
+					pageItemBytes, err := json.Marshal(page.Items[pageIndex])
+					if err != nil {
+						return nil, false, err
+					}
+
 					pageIndex++
-					return item, true
+					return pageItemBytes, true, nil
 				}
 
-				sdk.ProduceChunk(next, parse, data, signal)
+				sdk.ProduceChunk(next, parse, data, errors, signal)
 				produced += pageSize
+
 				if config.StopAfter != 0 && produced > config.StopAfter {
 					break
 				}
 			}
+
+			done()
 		}()
 
-		return data
-	}
+		return data, errors
+	}, nil
 }

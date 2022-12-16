@@ -4,9 +4,9 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func Trash(parse func(interface{}) error) sdk.Consumer {
-	return func(signal chan string) chan interface{} {
-		data := make(chan interface{}, 32)
+func Trash(parse func(interface{}) error) (sdk.Consumer, error) {
+	return func(signal chan string, done func()) (chan []byte, chan error) {
+		data := make(chan []byte, 32)
 
 		go func() {
 			for {
@@ -17,8 +17,10 @@ func Trash(parse func(interface{}) error) sdk.Consumer {
 					continue
 				}
 			}
+
+			done()
 		}()
 
-		return data
-	}
+		return data, nil
+	}, nil
 }

@@ -14,6 +14,8 @@ func Plugin() *sdk.Plugin {
 		ProvideTransformer: map[string]sdk.TransformerProvider{
 			"ifunny-content-author": getContentAuthor,
 			"ifunny-id":             getItemID,
+			"ifunny-lookup-user":    lookupUser,
+			"ifunny-lookup-content": lookupContent,
 		},
 	}
 }

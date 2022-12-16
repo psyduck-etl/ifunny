@@ -6,9 +6,33 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func Inspect(parse func(interface{}) error) sdk.Transformer {
-	return func(data interface{}) interface{} {
-		fmt.Println(data)
-		return data
+type InspectConfig struct {
+	BeString bool `psy:"be-string"`
+}
+
+func mustInspectConfig(parse func(interface{}) error) *InspectConfig {
+	config := &InspectConfig{
+		BeString: true,
 	}
+
+	if err := parse(config); err != nil {
+		panic(err)
+	}
+
+	return config
+}
+
+func Inspect(parse func(interface{}) error) (sdk.Transformer, error) {
+	formatter := func(data []byte) interface{} { return data }
+
+	config := mustInspectConfig(parse)
+	if config.BeString {
+		formatter = func(data []byte) interface{} { return string(data) }
+	}
+
+	return func(data []byte) ([]byte, error) {
+		fmt.Println(formatter(data))
+
+		return data, nil
+	}, nil
 }
