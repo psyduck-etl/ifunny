@@ -8,14 +8,11 @@ import (
 )
 
 type SnippetConfig struct {
-	Fields []string `yaml:"fields"`
+	Fields []string `psy:"fields"`
 }
 
-func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {
-	config := &SnippetConfig{
-		Fields: make([]string, 0),
-	}
-
+func mustSnippetConfig(parse sdk.Parser) *SnippetConfig {
+	config := new(SnippetConfig)
 	if err := parse(config); err != nil {
 		panic(err)
 	}
@@ -23,7 +20,7 @@ func mustSnippetConfig(parse func(interface{}) error) *SnippetConfig {
 	return config
 }
 
-func Snippet(parse func(interface{}) error) (sdk.Transformer, error) {
+func Snippet(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	config := mustSnippetConfig(parse)
 
 	return func(data []byte) ([]byte, error) {

@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 type Content struct {
 	ID         string   `json:"id"`

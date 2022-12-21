@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 type IFunnyConfig struct {
 	BearerToken string `psy:"bearer-token"`
@@ -10,10 +10,7 @@ type IFunnyConfig struct {
 }
 
 func mustConfig(parse func(interface{}) error) *IFunnyConfig {
-	config := &IFunnyConfig{
-		APIRoot: "https://api.ifunny.mobi/v4",
-	}
-
+	config := new(IFunnyConfig)
 	if err := parse(config); err != nil {
 		panic(err)
 	}

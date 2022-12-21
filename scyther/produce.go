@@ -1,4 +1,4 @@
-package scyther
+package main
 
 import (
 	"time"
@@ -6,13 +6,13 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceQueue(parse func(interface{}) error) (sdk.Producer, error) {
+func produceQueue(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
 	config := mustScytherConfig(parse)
 	if err := ensureQueue(config); err != nil {
 		return nil, err
 	}
 
-	return func(signal chan string, done func()) (chan []byte, chan error) {
+	return func() (chan []byte, chan error) {
 		data := make(chan []byte, 32)
 		errors := make(chan error)
 
@@ -27,8 +27,9 @@ func produceQueue(parse func(interface{}) error) (sdk.Producer, error) {
 		}
 
 		go func() {
-			sdk.ProduceChunk(next, parse, data, errors, signal)
-			done()
+			sdk.ProduceChunk(next, specParse, data, errors)
+			close(data)
+			close(errors)
 		}()
 
 		return data, errors

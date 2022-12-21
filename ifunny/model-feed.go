@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 type FeedPaging struct {
 	Cursors struct {

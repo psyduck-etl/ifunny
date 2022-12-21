@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 import (
 	"encoding/json"
@@ -6,51 +6,53 @@ import (
 	"github.com/gastrodon/psyduck/sdk"
 )
 
-func produceFeed(parse func(interface{}) error) (sdk.Producer, error) {
+func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
 	config := mustConfig(parse)
 
-	return func(signal chan string, done func()) (chan []byte, chan error) {
+	return func() (chan []byte, chan error) {
 		data := make(chan []byte, 32)
 		errors := make(chan error)
 
-		go func() {
-			produced := 0
-			nextPage := ""
+		nextPage := ""
+		pageSize := 0
+		pageIndex := 0
+		produced := 0
 
-			for {
-				page, err := getFeedPage(config, nextPage)
+		page, err := getFeedPage(config, nextPage)
+		if err != nil {
+			errors <- err
+		}
+
+		next := func() ([]byte, bool, error) {
+			if config.StopAfter != 0 && config.StopAfter <= produced {
+				return nil, false, nil
+			}
+
+			if pageIndex == pageSize {
+				page, err = getFeedPage(config, nextPage)
 				if err != nil {
-					errors <- err
-					break
+					return nil, false, err
 				}
 
 				nextPage = page.Paging.Cursors.Next
-				pageSize := len(page.Items)
-				pageIndex := 0
-
-				next := func() ([]byte, bool, error) {
-					if pageIndex == pageSize {
-						return nil, false, nil
-					}
-
-					pageItemBytes, err := json.Marshal(page.Items[pageIndex])
-					if err != nil {
-						return nil, false, err
-					}
-
-					pageIndex++
-					return pageItemBytes, true, nil
-				}
-
-				sdk.ProduceChunk(next, parse, data, errors, signal)
-				produced += pageSize
-
-				if config.StopAfter != 0 && produced > config.StopAfter {
-					break
-				}
+				pageSize = len(page.Items)
+				pageIndex = 0
 			}
 
-			done()
+			pageItemBytes, err := json.Marshal(page.Items[pageIndex])
+			if err != nil {
+				return nil, false, err
+			}
+
+			produced++
+			pageIndex++
+			return pageItemBytes, true, nil
+		}
+
+		go func() {
+			sdk.ProduceChunk(next, specParse, data, errors)
+			close(data)
+			close(errors)
 		}()
 
 		return data, errors

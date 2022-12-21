@@ -5,38 +5,23 @@ import (
 )
 
 type constant struct {
-	Value string `psy:"value"`
+	Value     string `psy:"value"`
+	StopAfter int    `psy:"stop-after"`
 }
 
-func constantDefault() *constant {
-	return &constant{
-		Value: "0",
-	}
-}
-
-func Constant(parse func(interface{}) error) (sdk.Producer, error) {
-	config := constantDefault()
+func Constant(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
+	config := new(constant)
 	parse(config)
 
-	return func(signal chan string, done func()) (chan []byte, chan error) {
+	count := 0
+	next := func() ([]byte, bool, error) {
+		count++
+		return []byte(config.Value), config.StopAfter != 0 && count < config.StopAfter, nil
+	}
+
+	return func() (chan []byte, chan error) {
 		data := make(chan []byte, 32)
-		alive := make(chan bool, 1)
-		alive <- true
-
-		go func() {
-			for {
-				select {
-				case received := <-signal:
-					panic(received)
-				case <-alive:
-					data <- []byte(config.Value)
-					alive <- true
-				}
-			}
-
-			done()
-		}()
-
+		go func() { sdk.ProduceChunk(next, specParse, data, nil) }()
 		return data, nil
 	}, nil
 }

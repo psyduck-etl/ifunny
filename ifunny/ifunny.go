@@ -1,7 +1,8 @@
-package ifunny
+package main
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"io"
 	"net/http"
@@ -20,7 +21,13 @@ func mustIFunnyRequest(config *IFunnyConfig, method, path string, body io.Reader
 }
 
 func getFeedPage(config *IFunnyConfig, nextPage string) (*FeedPage, error) {
-	request := mustIFunnyRequest(config, "GET", "/feeds/"+config.Feed, nil)
+	method := "GET"
+	if config.Feed == "collective" {
+		// eye roll emoji
+		method = "POST"
+	}
+
+	request := mustIFunnyRequest(config, method, "/feeds/"+config.Feed, nil)
 	request.Header.Add("accept", "video/mp4, image/jpeg")
 
 	query := request.URL.Query()
@@ -30,6 +37,14 @@ func getFeedPage(config *IFunnyConfig, nextPage string) (*FeedPage, error) {
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return nil, err
+	}
+
+	if response.StatusCode != 200 {
+		if nextPage != "" {
+			return nil, fmt.Errorf("got %d getting the feed %s[%s]", response.StatusCode, config.Feed, nextPage)
+		}
+
+		return nil, fmt.Errorf("got %d getting the feed %s[<root>]", response.StatusCode, config.Feed)
 	}
 
 	bodyBytes, err := io.ReadAll(response.Body)
