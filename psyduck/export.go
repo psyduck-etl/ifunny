@@ -1,4 +1,4 @@
-package psyduck
+package main
 
 import (
 	"github.com/gastrodon/psyduck-std/psyduck/consume"

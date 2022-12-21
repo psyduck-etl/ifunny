@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 import (
 	"github.com/gastrodon/psyduck/sdk"

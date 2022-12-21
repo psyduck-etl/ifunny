@@ -1,4 +1,4 @@
-package scyther
+package main
 
 import (
 	"time"

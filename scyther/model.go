@@ -1,4 +1,4 @@
-package scyther
+package main
 
 type ScytherConfig struct {
 	URL              string `psy:"url"`

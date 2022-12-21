@@ -1,4 +1,4 @@
-package ifunny
+package main
 
 type IFunnyConfig struct {
 	BearerToken string `psy:"bearer-token"`
