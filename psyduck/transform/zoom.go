@@ -8,7 +8,7 @@ import (
 )
 
 type ZoomConfig struct {
-	Field string `yaml:"field"`
+	Field string `psy:"field"`
 }
 
 type ZoomTarget []byte
