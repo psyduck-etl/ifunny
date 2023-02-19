@@ -1,7 +1,0 @@
-github.com/gastrodon/psyduck v1.2.0 h1:WUK7BXXdGSgPw1jjO0Lg3hS/hequdbgsTms7mqXTKfU=
-github.com/gastrodon/psyduck v1.2.0/go.mod h1:upXxtPN2gIBUy4/UOGI4SZ9tQGzEfou+OFwxgAi/Qbg=
-github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
-github.com/zclconf/go-cty v1.12.1 h1:PcupnljUm9EIvbgSHQnHhUr3fO6oFmkOrvs2BAFNXXY=
-github.com/zclconf/go-cty v1.12.1/go.mod h1:s9IfD1LK5ccNMSWCVFCE2rJfHiZgi7JijgeWIMfhLvA=
-golang.org/x/text v0.7.0 h1:4BRB4x83lYWy72KwLD/qYDuTu7q9PjSagHvijDw7cLo=
-golang.org/x/text v0.7.0/go.mod h1:mrYo+phRRbMaCq/xk9113O4dZlRixOauAjOtrjsXDZ8=
