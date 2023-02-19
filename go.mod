@@ -1,6 +1,6 @@
-module github.com/gastrodon/psyduck-std/ifunny
+module github.com/psyduck-std/ifunny
 
-go 1.19
+go 1.18
 
 require (
 	github.com/gastrodon/psyduck v1.2.1
