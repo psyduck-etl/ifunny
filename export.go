@@ -1,7 +1,9 @@
 package main
 
 import (
-	"github.com/gastrodon/psyduck/sdk"
+	"math"
+
+	"github.com/psyduck-etl/sdk"
 	"github.com/zclconf/go-cty/cty"
 )
 
@@ -19,34 +21,34 @@ func Plugin() *sdk.Plugin {
 					"feed": &sdk.Spec{
 						Name:        "feed",
 						Description: "feed to pull content from",
-						Type:        sdk.String,
+						Type:        cty.String,
 						Required:    true,
 					},
 					"bearer-token": &sdk.Spec{
 						Name:        "bearer-token",
 						Description: "bearer token to auth with",
-						Type:        sdk.String,
+						Type:        cty.String,
 						Required:    true,
 					},
 					"user-agent": &sdk.Spec{
 						Name:        "user-agent",
 						Description: "user agent to make requests as",
-						Type:        sdk.String,
+						Type:        cty.String,
 						Required:    true,
 					},
 					"api-root": &sdk.Spec{
 						Name:        "api-root",
 						Description: "root of the iFunny API",
-						Type:        sdk.String,
+						Type:        cty.String,
 						Required:    false,
 						Default:     cty.StringVal(IFUNNY_API_ROOT),
 					},
 					"stop-after": &sdk.Spec{
 						Name:        "stop-after",
 						Description: "stop producing after n content",
-						Type:        sdk.Integer,
+						Type:        cty.Number,
 						Required:    false,
-						Default:     cty.NumberIntVal(128),
+						Default:     cty.NumberIntVal(math.MaxUint8),
 					},
 				},
 			},

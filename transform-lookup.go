@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/gastrodon/psyduck/sdk"
+	"github.com/psyduck-etl/sdk"
 )
 
 func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {

@@ -3,16 +3,13 @@ package main
 import (
 	"encoding/json"
 
-	"github.com/gastrodon/psyduck/sdk"
+	"github.com/psyduck-etl/sdk"
 )
 
 func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
 	config := mustConfig(parse)
 
-	return func() (chan []byte, chan error) {
-		data := make(chan []byte, 32)
-		errors := make(chan error)
-
+	return func(send chan<- []byte, errs chan<- error) {
 		nextPage := ""
 		pageSize := 0
 		pageIndex := 0
@@ -20,7 +17,7 @@ func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, erro
 
 		page, err := getFeedPage(config, nextPage)
 		if err != nil {
-			errors <- err
+			errs <- err
 		}
 
 		next := func() ([]byte, bool, error) {
@@ -49,12 +46,11 @@ func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, erro
 			return pageItemBytes, true, nil
 		}
 
-		go func() {
-			sdk.ProduceChunk(next, specParse, data, errors)
-			close(data)
-			close(errors)
-		}()
+		if err := sdk.ProduceChunk(next, specParse, send); err != nil {
+			errs <- err
+		}
 
-		return data, errors
+		close(send)
+		close(errs)
 	}, nil
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gastrodon/psyduck/sdk"
+	"github.com/psyduck-etl/sdk"
 )
 
 func getContentAuthor(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
