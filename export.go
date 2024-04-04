@@ -7,7 +7,13 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-const IFUNNY_API_ROOT = "https://api.ifunny.mobi/v4"
+type IFunnyConfig struct {
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+
+	Feed      string `psy:"feed"`
+	StopAfter int    `psy:"stop-after"`
+}
 
 func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
@@ -35,13 +41,6 @@ func Plugin() *sdk.Plugin {
 						Description: "user agent to make requests as",
 						Type:        cty.String,
 						Required:    true,
-					},
-					"api-root": &sdk.Spec{
-						Name:        "api-root",
-						Description: "root of the iFunny API",
-						Type:        cty.String,
-						Required:    false,
-						Default:     cty.StringVal(IFUNNY_API_ROOT),
 					},
 					"stop-after": &sdk.Spec{
 						Name:        "stop-after",

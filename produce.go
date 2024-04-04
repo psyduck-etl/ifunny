@@ -3,54 +3,47 @@ package main
 import (
 	"encoding/json"
 
+	"github.com/open-ifunny/ifunny-go"
 	"github.com/psyduck-etl/sdk"
 )
 
 func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
-	config := mustConfig(parse)
+	config := new(IFunnyConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	iter := client.IterFeed(config.Feed)
 
 	return func(send chan<- []byte, errs chan<- error) {
-		nextPage := ""
-		pageSize := 0
-		pageIndex := 0
-		produced := 0
+		defer close(send)
+		defer close(errs)
+		iters := 0
 
-		page, err := getFeedPage(config, nextPage)
-		if err != nil {
-			errs <- err
-		}
-
-		next := func() ([]byte, bool, error) {
-			if config.StopAfter != 0 && config.StopAfter <= produced {
-				return nil, false, nil
+		for {
+			if config.StopAfter != 0 && config.StopAfter >= iters {
+				return
 			}
 
-			if pageIndex == pageSize {
-				page, err = getFeedPage(config, nextPage)
-				if err != nil {
-					return nil, false, err
-				}
-
-				nextPage = page.Paging.Cursors.Next
-				pageSize = len(page.Items)
-				pageIndex = 0
+			r := <-iter
+			if r.Err != nil {
+				errs <- r.Err
+				return
 			}
 
-			pageItemBytes, err := json.Marshal(page.Items[pageIndex])
+			b, err := json.Marshal(r.V)
 			if err != nil {
-				return nil, false, err
+				errs <- err
+				return
 			}
 
-			produced++
-			pageIndex++
-			return pageItemBytes, true, nil
+			send <- b
+			iters++
 		}
-
-		if err := sdk.ProduceChunk(next, specParse, send); err != nil {
-			errs <- err
-		}
-
-		close(send)
-		close(errs)
 	}, nil
 }

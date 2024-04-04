@@ -3,17 +3,22 @@ package main
 import (
 	"encoding/json"
 
+	"github.com/open-ifunny/ifunny-go"
+	"github.com/open-ifunny/ifunny-go/compose"
 	"github.com/psyduck-etl/sdk"
 )
 
 func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
 	return func(data []byte) ([]byte, error) {
-		who := new(Identity)
-		if err := json.Unmarshal(data, who); err != nil {
+		identity := new(struct {
+			ID string `json:"id"`
+		})
+
+		if err := json.Unmarshal(data, identity); err != nil {
 			return nil, err
 		}
 
-		found, err := looker(who.ID)
+		found, err := looker(identity.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -28,18 +33,33 @@ func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
 }
 
 func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
-	config := mustConfig(parse)
+	config := new(IFunnyConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	if err != nil {
+		return nil, err
+	}
 
 	return lookup(func(id string) (interface{}, error) {
-		return getContent(config, id)
+		return client.GetContent(id)
 	})
-
 }
 
 func lookupUser(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
-	config := mustConfig(parse)
+	config := new(IFunnyConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	if err != nil {
+		return nil, err
+	}
 
 	return lookup(func(id string) (interface{}, error) {
-		return getUser(config, id)
+		return client.GetUser(compose.UserByID(id))
 	})
 }
