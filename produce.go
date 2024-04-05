@@ -26,7 +26,7 @@ func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, erro
 		iters := 0
 
 		for {
-			if config.StopAfter != 0 && config.StopAfter >= iters {
+			if config.StopAfter != 0 && iters >= config.StopAfter {
 				return
 			}
 
