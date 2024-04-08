@@ -14,7 +14,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
-	golang.org/x/sys v0.6.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
 )
 
 require (
@@ -23,3 +23,5 @@ require (
 	github.com/open-ifunny/ifunny-go v0.0.2
 	golang.org/x/text v0.14.0 // indirect
 )
+
+replace github.com/zclconf/go-cty => github.com/gastrodon/go-cty v1.14.4-1
