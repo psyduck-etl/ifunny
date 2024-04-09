@@ -3,18 +3,19 @@ module github.com/psyduck-etl/ifunny
 go 1.22.1
 
 require (
-	github.com/psyduck-etl/sdk v0.2.1
+	github.com/psyduck-etl/sdk v0.2.2
 	github.com/zclconf/go-cty v1.14.4
 )
 
 require (
 	github.com/gastrodon/turnpike v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/gorilla/websocket v1.5.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
-	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/sys v0.19.0 // indirect
 )
 
 require (
