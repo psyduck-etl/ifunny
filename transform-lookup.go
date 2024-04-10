@@ -66,6 +66,15 @@ func lookupUser(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
 	}
 
 	return lookup(func(id string) (interface{}, error) {
-		return client.GetUser(compose.UserByID(id))
+		user, err := client.GetUser(compose.UserByID(id))
+		if err != nil {
+			if apierr, ok := err.(ifunny.APIError); ok && apierr.Kind == "not_found" {
+				return nil, nil
+			}
+
+			return nil, err
+		}
+
+		return user, nil
 	})
 }
