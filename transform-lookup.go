@@ -33,7 +33,10 @@ func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
 }
 
 func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
-	config := new(IFunnyConfig)
+	config := new(struct {
+		BearerToken string `psy:"bearer-token"`
+		UserAgent   string `psy:"user-agent"`
+	})
 	if err := parse(config); err != nil {
 		return nil, err
 	}
@@ -49,7 +52,10 @@ func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) 
 }
 
 func lookupUser(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
-	config := new(IFunnyConfig)
+	config := new(struct {
+		BearerToken string `psy:"bearer-token"`
+		UserAgent   string `psy:"user-agent"`
+	})
 	if err := parse(config); err != nil {
 		return nil, err
 	}
