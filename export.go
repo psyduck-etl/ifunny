@@ -15,6 +15,21 @@ type IFunnyConfig struct {
 	StopAfter int    `psy:"stop-after"`
 }
 
+var (
+	specBearerToken = sdk.Spec{
+		Name:        "bearer-token",
+		Description: "bearer token to auth with",
+		Type:        cty.String,
+		Required:    true,
+	}
+	specUserAgent = sdk.Spec{
+		Name:        "user-agent",
+		Description: "user agent to make requests as",
+		Type:        cty.String,
+		Required:    true,
+	}
+)
+
 func Plugin() *sdk.Plugin {
 	return &sdk.Plugin{
 		Name: "ifunny",
@@ -24,21 +39,11 @@ func Plugin() *sdk.Plugin {
 				Name:            "ifunny-feed",
 				ProvideProducer: produceFeed,
 				Spec: sdk.SpecMap{
+					"bearer-token": &specBearerToken,
+					"user-agent":   &specUserAgent,
 					"feed": &sdk.Spec{
 						Name:        "feed",
 						Description: "feed to pull content from",
-						Type:        cty.String,
-						Required:    true,
-					},
-					"bearer-token": &sdk.Spec{
-						Name:        "bearer-token",
-						Description: "bearer token to auth with",
-						Type:        cty.String,
-						Required:    true,
-					},
-					"user-agent": &sdk.Spec{
-						Name:        "user-agent",
-						Description: "user agent to make requests as",
 						Type:        cty.String,
 						Required:    true,
 					},
@@ -60,11 +65,19 @@ func Plugin() *sdk.Plugin {
 				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-lookup-content",
 				ProvideTransformer: lookupContent,
+				Spec: sdk.SpecMap{
+					"bearer-token": &specBearerToken,
+					"user-agent":   &specUserAgent,
+				},
 			},
 			{
 				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-lookup-user",
 				ProvideTransformer: lookupUser,
+				Spec: sdk.SpecMap{
+					"bearer-token": &specBearerToken,
+					"user-agent":   &specUserAgent,
+				},
 			},
 		},
 	}
