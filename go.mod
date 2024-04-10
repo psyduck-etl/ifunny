@@ -3,6 +3,7 @@ module github.com/psyduck-etl/ifunny
 go 1.22.1
 
 require (
+	github.com/open-ifunny/ifunny-go v0.0.3
 	github.com/psyduck-etl/sdk v0.2.2
 	github.com/zclconf/go-cty v1.14.4
 )
@@ -21,7 +22,6 @@ require (
 require (
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
-	github.com/open-ifunny/ifunny-go v0.0.2
 	golang.org/x/text v0.14.0 // indirect
 )
 
