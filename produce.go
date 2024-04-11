@@ -2,13 +2,24 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/open-ifunny/ifunny-go"
+	"github.com/open-ifunny/ifunny-go/compose"
 	"github.com/psyduck-etl/sdk"
 )
 
+type feedConfig struct {
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+
+	Feed      string `psy:"feed"`
+	Timeline  string `psy:"timeline"`
+	StopAfter int    `psy:"stop-after"`
+}
+
 func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
-	config := new(IFunnyConfig)
+	config := new(feedConfig)
 	if err := parse(config); err != nil {
 		return nil, err
 	}
@@ -18,7 +29,15 @@ func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, erro
 		return nil, err
 	}
 
-	iter := client.IterFeed(config.Feed)
+	var iter <-chan ifunny.Result[*ifunny.Content]
+	switch {
+	case config.Timeline != "":
+		iter = client.IterFeed(config.Timeline, compose.Timeline)
+	case config.Feed != "":
+		iter = client.IterFeed(config.Feed, compose.Feed)
+	default:
+		return nil, fmt.Errorf("exactly one of feed or timeline is required")
+	}
 
 	return func(send chan<- []byte, errs chan<- error) {
 		defer close(send)
@@ -33,6 +52,10 @@ func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, erro
 			r := <-iter
 			if r.Err != nil {
 				errs <- r.Err
+				return
+			}
+
+			if r.V == nil {
 				return
 			}
 

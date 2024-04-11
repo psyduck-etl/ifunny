@@ -7,14 +7,6 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-type IFunnyConfig struct {
-	BearerToken string `psy:"bearer-token"`
-	UserAgent   string `psy:"user-agent"`
-
-	Feed      string `psy:"feed"`
-	StopAfter int    `psy:"stop-after"`
-}
-
 var (
 	specBearerToken = sdk.Spec{
 		Name:        "bearer-token",
@@ -45,7 +37,15 @@ func Plugin() *sdk.Plugin {
 						Name:        "feed",
 						Description: "feed to pull content from",
 						Type:        cty.String,
-						Required:    true,
+						Required:    false,
+						Default:     cty.StringVal(""),
+					},
+					"timeline": &sdk.Spec{
+						Name:        "timeline",
+						Description: "id of user to pull content from",
+						Type:        cty.String,
+						Required:    false,
+						Default:     cty.StringVal(""),
 					},
 					"stop-after": &sdk.Spec{
 						Name:        "stop-after",
