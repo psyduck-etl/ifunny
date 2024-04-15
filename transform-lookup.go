@@ -32,7 +32,7 @@ func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
 	}, nil
 }
 
-func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
+func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 	config := new(struct {
 		BearerToken string `psy:"bearer-token"`
 		UserAgent   string `psy:"user-agent"`
@@ -51,7 +51,7 @@ func lookupContent(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) 
 	})
 }
 
-func lookupUser(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
+func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 	config := new(struct {
 		BearerToken string `psy:"bearer-token"`
 		UserAgent   string `psy:"user-agent"`

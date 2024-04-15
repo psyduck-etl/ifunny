@@ -8,7 +8,7 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-func getContentAuthor(parse sdk.Parser, _ sdk.SpecParser) (sdk.Transformer, error) {
+func getContentAuthor(parse sdk.Parser) (sdk.Transformer, error) {
 	return func(data []byte) ([]byte, error) {
 		content := new(ifunny.Content)
 		if err := json.Unmarshal(data, content); err != nil {

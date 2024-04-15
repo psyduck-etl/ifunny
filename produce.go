@@ -18,7 +18,7 @@ type feedConfig struct {
 	StopAfter int    `psy:"stop-after"`
 }
 
-func produceFeed(parse sdk.Parser, specParse sdk.SpecParser) (sdk.Producer, error) {
+func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 	config := new(feedConfig)
 	if err := parse(config); err != nil {
 		return nil, err
