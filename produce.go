@@ -9,10 +9,85 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-type feedConfig struct {
+type authConfig struct {
 	BearerToken string `psy:"bearer-token"`
 	UserAgent   string `psy:"user-agent"`
+}
 
+type commentConfig struct {
+	authConfig
+	Content string `psy:"content"`
+}
+
+func produceIter[T any](iter <-chan ifunny.Result[*T], stopAfter int, send chan<- []byte, errs chan<- error) {
+	defer close(send)
+	defer close(errs)
+	if stopAfter == 0 {
+		for {
+			r := <-iter
+			if r.Err != nil {
+				errs <- r.Err
+				return
+			}
+
+			if r.V == nil {
+				return
+			}
+
+			b, err := json.Marshal(r.V)
+			if err != nil {
+				errs <- err
+				return
+			}
+
+			send <- b
+		}
+	}
+
+	for i := 0; i < stopAfter; i++ {
+		r := <-iter
+		if r.Err != nil {
+			errs <- r.Err
+			return
+		}
+
+		if r.V == nil {
+			return
+		}
+
+		b, err := json.Marshal(r.V)
+		if err != nil {
+			errs <- err
+			return
+		}
+
+		send <- b
+	}
+}
+
+func produceComments(parse sdk.Parser) (sdk.Producer, error) {
+	config := new(commentConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := client.GetContent(config.Content); err != nil {
+		return nil, err
+	}
+
+	iter := client.IterComments(config.Content)
+	return func(send chan<- []byte, errs chan<- error) {
+		produceIter(iter, 0, send, errs)
+	}, nil
+}
+
+type feedConfig struct {
+	authConfig
 	Feed      string `psy:"feed"`
 	Timeline  string `psy:"timeline"`
 	StopAfter int    `psy:"stop-after"`
@@ -40,33 +115,6 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		defer close(send)
-		defer close(errs)
-		iters := 0
-
-		for {
-			if config.StopAfter != 0 && iters >= config.StopAfter {
-				return
-			}
-
-			r := <-iter
-			if r.Err != nil {
-				errs <- r.Err
-				return
-			}
-
-			if r.V == nil {
-				return
-			}
-
-			b, err := json.Marshal(r.V)
-			if err != nil {
-				errs <- err
-				return
-			}
-
-			send <- b
-			iters++
-		}
+		produceIter(iter, config.StopAfter, send, errs)
 	}, nil
 }

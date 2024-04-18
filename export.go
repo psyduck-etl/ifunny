@@ -57,6 +57,21 @@ func Plugin() *sdk.Plugin {
 				},
 			},
 			{
+				Kinds:           sdk.PRODUCER,
+				Name:            "ifunny-comments",
+				ProvideProducer: produceComments,
+				Spec: sdk.SpecMap{
+					"bearer-token": &specBearerToken,
+					"user-agent":   &specUserAgent,
+					"content": &sdk.Spec{
+						Name:        "content",
+						Description: "Content item to iter comments from",
+						Required:    true,
+						Type:        cty.String,
+					},
+				},
+			},
+			{
 				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-content-author",
 				ProvideTransformer: getContentAuthor,
