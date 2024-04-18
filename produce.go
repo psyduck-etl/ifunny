@@ -9,14 +9,10 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-type authConfig struct {
+type commentConfig struct {
 	BearerToken string `psy:"bearer-token"`
 	UserAgent   string `psy:"user-agent"`
-}
-
-type commentConfig struct {
-	authConfig
-	Content string `psy:"content"`
+	Content     string `psy:"content"`
 }
 
 func produceIter[T any](iter <-chan ifunny.Result[*T], stopAfter int, send chan<- []byte, errs chan<- error) {
@@ -87,10 +83,11 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type feedConfig struct {
-	authConfig
-	Feed      string `psy:"feed"`
-	Timeline  string `psy:"timeline"`
-	StopAfter int    `psy:"stop-after"`
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+	Feed        string `psy:"feed"`
+	Timeline    string `psy:"timeline"`
+	StopAfter   int    `psy:"stop-after"`
 }
 
 func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
