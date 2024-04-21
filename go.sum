@@ -19,8 +19,8 @@ github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7
 github.com/jtolds/gls v4.20.0+incompatible/go.mod h1:QJZ7F/aHp+rZTRtaJ1ow/lLfFfVYBRgL+9YlvaHOwJU=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
-github.com/open-ifunny/ifunny-go v0.0.8 h1:KMsM+wWLKrKNmD9NTOHveIBpHLCKKjg2UORMsrD9ewk=
-github.com/open-ifunny/ifunny-go v0.0.8/go.mod h1:yq3qwrY4DSHkQolejEapLKEHHgIg+rJoE4U1iYjB4fw=
+github.com/open-ifunny/ifunny-go v0.0.9 h1:74K5+rNdqGt+L6bPDj6P/cRVT6NuNtuq/b7pC6blqgI=
+github.com/open-ifunny/ifunny-go v0.0.9/go.mod h1:yq3qwrY4DSHkQolejEapLKEHHgIg+rJoE4U1iYjB4fw=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/psyduck-etl/sdk v0.3.0 h1:d0Oh8qwmfBCZfZm8R/LE/LUJ68B4zqEft5AkS5iSjsM=

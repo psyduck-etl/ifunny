@@ -20,6 +20,13 @@ var (
 		Type:        cty.String,
 		Required:    true,
 	}
+	specStopAfter = sdk.Spec{
+		Name:        "stop-after",
+		Description: "stop producing after n content",
+		Type:        cty.Number,
+		Required:    false,
+		Default:     cty.NumberIntVal(math.MaxUint8),
+	}
 )
 
 func Plugin() *sdk.Plugin {
@@ -33,6 +40,7 @@ func Plugin() *sdk.Plugin {
 				Spec: sdk.SpecMap{
 					"bearer-token": &specBearerToken,
 					"user-agent":   &specUserAgent,
+					"stop-after":   &specStopAfter,
 					"feed": &sdk.Spec{
 						Name:        "feed",
 						Description: "feed to pull content from",
@@ -47,12 +55,27 @@ func Plugin() *sdk.Plugin {
 						Required:    false,
 						Default:     cty.StringVal(""),
 					},
-					"stop-after": &sdk.Spec{
-						Name:        "stop-after",
-						Description: "stop producing after n content",
-						Type:        cty.Number,
-						Required:    false,
-						Default:     cty.NumberIntVal(math.MaxUint8),
+				},
+			},
+			{
+				Kinds:           sdk.PRODUCER,
+				Name:            "ifunny-explore",
+				ProvideProducer: produceExplore,
+				Spec: sdk.SpecMap{
+					"bearer-token": &specBearerToken,
+					"user-agent":   &specUserAgent,
+					"stop-after":   &specStopAfter,
+					"compilation": {
+						Name:        "compilation",
+						Description: "Explore compilation to pull from",
+						Required:    true,
+						Type:        cty.String,
+					},
+					"kind": &sdk.Spec{
+						Name:        "kind",
+						Description: "Kind of content to explore, one of: [content, user, chat]",
+						Required:    true,
+						Type:        cty.String,
 					},
 				},
 			},

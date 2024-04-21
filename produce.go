@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/open-ifunny/ifunny-go"
-	"github.com/open-ifunny/ifunny-go/compose"
 	"github.com/psyduck-etl/sdk"
 )
 
@@ -101,17 +100,53 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	var iter <-chan ifunny.Result[*ifunny.Content]
 	switch {
 	case config.Timeline != "":
-		iter = client.IterFeed(config.Timeline, compose.Timeline)
+		return func(send chan<- []byte, errs chan<- error) {
+			produceIter(client.IterTimeline(config.Timeline), config.StopAfter, send, errs)
+		}, nil
 	case config.Feed != "":
-		iter = client.IterFeed(config.Feed, compose.Feed)
+		return func(send chan<- []byte, errs chan<- error) {
+			produceIter(client.IterFeed(config.Feed), config.StopAfter, send, errs)
+		}, nil
 	default:
 		return nil, fmt.Errorf("exactly one of feed or timeline is required")
 	}
+}
 
-	return func(send chan<- []byte, errs chan<- error) {
-		produceIter(iter, config.StopAfter, send, errs)
-	}, nil
+type exploreConfig struct {
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+	Kind        string `psy:"kind"`
+	Compilation string `psy:"compilation"`
+	StopAfter   int    `psy:"stop-after"`
+}
+
+func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
+	config := new(exploreConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	if err != nil {
+		return nil, err
+	}
+
+	switch config.Kind {
+	case "content":
+		return func(send chan<- []byte, errs chan<- error) {
+			produceIter(client.IterExploreContent(config.Compilation), config.StopAfter, send, errs)
+		}, nil
+	case "user":
+		return func(send chan<- []byte, errs chan<- error) {
+			produceIter(client.IterExploreUser(config.Compilation), config.StopAfter, send, errs)
+		}, nil
+	case "chat":
+		return func(send chan<- []byte, errs chan<- error) {
+			produceIter(client.IterExploreChatChannel(config.Compilation), config.StopAfter, send, errs)
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown explore data kind: %s", config.Kind)
+	}
 }
