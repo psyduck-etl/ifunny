@@ -8,31 +8,67 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-func lookup(looker func(string) (interface{}, error)) (sdk.Transformer, error) {
-	return func(data []byte) ([]byte, error) {
-		identity := new(struct {
-			ID string `json:"id"`
-		})
-
-		if err := json.Unmarshal(data, identity); err != nil {
-			return nil, err
-		}
-
-		found, err := looker(identity.ID)
-		if err != nil {
-			return nil, err
-		}
-
-		foundBytes, err := json.Marshal(found)
-		if err != nil {
-			return nil, err
-		}
-
-		return foundBytes, nil
-	}, nil
+// Lookup Content Transformer
+type lookupContentTransformer struct {
+	client *ifunny.Client
 }
 
-func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
+func (t *lookupContentTransformer) Transform(data []byte) ([]byte, error) {
+	identity := new(struct {
+		ID string `json:"id"`
+	})
+
+	if err := json.Unmarshal(data, identity); err != nil {
+		return nil, err
+	}
+
+	found, err := t.client.GetContent(identity.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	foundBytes, err := json.Marshal(found)
+	if err != nil {
+		return nil, err
+	}
+
+	return foundBytes, nil
+}
+
+// Lookup User Transformer
+type lookupUserTransformer struct {
+	client *ifunny.Client
+}
+
+func (t *lookupUserTransformer) Transform(data []byte) ([]byte, error) {
+	identity := new(struct {
+		ID string `json:"id"`
+	})
+
+	if err := json.Unmarshal(data, identity); err != nil {
+		return nil, err
+	}
+
+	user, err := t.client.GetUser(compose.UserByID(identity.ID))
+	if err != nil {
+		if apierr, ok := err.(ifunny.APIError); ok && apierr.Kind == "not_found" {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	foundBytes, err := json.Marshal(user)
+	if err != nil {
+		return nil, err
+	}
+
+	return foundBytes, nil
+}
+
+// Provider types
+type lookupContentProvider struct{}
+
+func (lookupContentProvider) ProvideTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := new(struct {
 		BearerToken string `psy:"bearer-token"`
 		UserAgent   string `psy:"user-agent"`
@@ -46,12 +82,12 @@ func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	return lookup(func(id string) (interface{}, error) {
-		return client.GetContent(id)
-	})
+	return &lookupContentTransformer{client: client}, nil
 }
 
-func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
+type lookupUserProvider struct{}
+
+func (lookupUserProvider) ProvideTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := new(struct {
 		BearerToken string `psy:"bearer-token"`
 		UserAgent   string `psy:"user-agent"`
@@ -65,16 +101,8 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	return lookup(func(id string) (interface{}, error) {
-		user, err := client.GetUser(compose.UserByID(id))
-		if err != nil {
-			if apierr, ok := err.(ifunny.APIError); ok && apierr.Kind == "not_found" {
-				return nil, nil
-			}
-
-			return nil, err
-		}
-
-		return user, nil
-	})
+	return &lookupUserTransformer{client: client}, nil
 }
+
+var LookupContentTransformer = lookupContentProvider{}
+var LookupUserTransformer = lookupUserProvider{}

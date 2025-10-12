@@ -8,70 +8,67 @@ import (
 )
 
 var (
-	specBearerToken = sdk.Spec{
+	specBearerToken = &sdk.Spec{
 		Name:        "bearer-token",
 		Description: "bearer token to auth with",
 		Type:        cty.String,
 		Required:    true,
 	}
-	specUserAgent = sdk.Spec{
+	specUserAgent = &sdk.Spec{
 		Name:        "user-agent",
 		Description: "user agent to make requests as",
 		Type:        cty.String,
 		Required:    true,
 	}
-	specStopAfter = sdk.Spec{
+	specStopAfter = &sdk.Spec{
 		Name:        "stop-after",
 		Description: "stop producing after n content",
 		Type:        cty.Number,
-		Required:    false,
 		Default:     cty.NumberIntVal(math.MaxUint8),
 	}
 )
 
-func Plugin() *sdk.Plugin {
-	return &sdk.Plugin{
+func main() {
+	plugin := &sdk.Plugin{
 		Name: "ifunny",
 		Resources: []*sdk.Resource{
 			{
-				Kinds:           sdk.PRODUCER,
 				Name:            "ifunny-feed",
-				ProvideProducer: produceFeed,
-				Spec: sdk.SpecMap{
-					"bearer-token": &specBearerToken,
-					"user-agent":   &specUserAgent,
-					"stop-after":   &specStopAfter,
-					"feed": &sdk.Spec{
+				Kinds:           sdk.PRODUCER,
+				ProvideProducer: FeedProducer,
+				Spec: []*sdk.Spec{
+					specBearerToken,
+					specUserAgent,
+					specStopAfter,
+					{
 						Name:        "feed",
 						Description: "feed to pull content from",
 						Type:        cty.String,
-						Required:    false,
 						Default:     cty.StringVal(""),
 					},
-					"timeline": &sdk.Spec{
+					{
 						Name:        "timeline",
 						Description: "id of user to pull content from",
 						Type:        cty.String,
-						Required:    false,
 						Default:     cty.StringVal(""),
 					},
 				},
 			},
 			{
-				Kinds:           sdk.PRODUCER,
 				Name:            "ifunny-explore",
-				ProvideProducer: produceExplore,
-				Spec: sdk.SpecMap{
-					"bearer-token": &specBearerToken,
-					"user-agent":   &specUserAgent,
-					"stop-after":   &specStopAfter,
-					"compilation": {
+				Kinds:           sdk.PRODUCER,
+				ProvideProducer: ExploreProducer,
+				Spec: []*sdk.Spec{
+					specBearerToken,
+					specUserAgent,
+					specStopAfter,
+					{
 						Name:        "compilation",
 						Description: "Explore compilation to pull from",
 						Required:    true,
 						Type:        cty.String,
 					},
-					"kind": &sdk.Spec{
+					{
 						Name:        "kind",
 						Description: "Kind of content to explore, one of: [content, user, chat]",
 						Required:    true,
@@ -80,13 +77,13 @@ func Plugin() *sdk.Plugin {
 				},
 			},
 			{
-				Kinds:           sdk.PRODUCER,
 				Name:            "ifunny-comments",
-				ProvideProducer: produceComments,
-				Spec: sdk.SpecMap{
-					"bearer-token": &specBearerToken,
-					"user-agent":   &specUserAgent,
-					"content": &sdk.Spec{
+				Kinds:           sdk.PRODUCER,
+				ProvideProducer: CommentsProducer,
+				Spec: []*sdk.Spec{
+					specBearerToken,
+					specUserAgent,
+					{
 						Name:        "content",
 						Description: "Content item to iter comments from",
 						Required:    true,
@@ -95,28 +92,31 @@ func Plugin() *sdk.Plugin {
 				},
 			},
 			{
-				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-content-author",
-				ProvideTransformer: getContentAuthor,
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: ContentAuthorTransformer,
 			},
 			{
-				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-lookup-content",
-				ProvideTransformer: lookupContent,
-				Spec: sdk.SpecMap{
-					"bearer-token": &specBearerToken,
-					"user-agent":   &specUserAgent,
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: LookupContentTransformer,
+				Spec: []*sdk.Spec{
+					specBearerToken,
+					specUserAgent,
 				},
 			},
 			{
-				Kinds:              sdk.TRANSFORMER,
 				Name:               "ifunny-lookup-user",
-				ProvideTransformer: lookupUser,
-				Spec: sdk.SpecMap{
-					"bearer-token": &specBearerToken,
-					"user-agent":   &specUserAgent,
+				Kinds:              sdk.TRANSFORMER,
+				ProvideTransformer: LookupUserTransformer,
+				Spec: []*sdk.Spec{
+					specBearerToken,
+					specUserAgent,
 				},
 			},
 		},
 	}
+
+	// Run as gRPC client process
+	sdk.RunAsClientProcess(plugin)
 }

@@ -8,18 +8,28 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-func getContentAuthor(parse sdk.Parser) (sdk.Transformer, error) {
-	return func(data []byte) ([]byte, error) {
-		content := new(ifunny.Content)
-		if err := json.Unmarshal(data, content); err != nil {
-			panic(fmt.Errorf("can't unmarshal bytes %v as Content: %s", data, err))
-		}
+// Content Author Transformer
+type contentAuthorTransformer struct{}
 
-		creatorBytes, err := json.Marshal(content.Creator)
-		if err != nil {
-			panic(err)
-		}
+func (t *contentAuthorTransformer) Transform(data []byte) ([]byte, error) {
+	content := new(ifunny.Content)
+	if err := json.Unmarshal(data, content); err != nil {
+		return nil, fmt.Errorf("can't unmarshal bytes %v as Content: %s", data, err)
+	}
 
-		return creatorBytes, nil
-	}, nil
+	creatorBytes, err := json.Marshal(content.Creator)
+	if err != nil {
+		return nil, err
+	}
+
+	return creatorBytes, nil
 }
+
+// Provider type
+type contentAuthorProvider struct{}
+
+func (contentAuthorProvider) ProvideTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	return &contentAuthorTransformer{}, nil
+}
+
+var ContentAuthorTransformer = contentAuthorProvider{}

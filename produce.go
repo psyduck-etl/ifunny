@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -14,53 +15,124 @@ type commentConfig struct {
 	Content     string `psy:"content"`
 }
 
-func produceIter[T any](iter <-chan ifunny.Result[*T], stopAfter int, send chan<- []byte, errs chan<- error) {
-	defer close(send)
-	defer close(errs)
-	if stopAfter == 0 {
-		for {
-			r := <-iter
+type feedConfig struct {
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+	Feed        string `psy:"feed"`
+	Timeline    string `psy:"timeline"`
+	StopAfter   int    `psy:"stop-after"`
+}
+
+type exploreConfig struct {
+	BearerToken string `psy:"bearer-token"`
+	UserAgent   string `psy:"user-agent"`
+	Kind        string `psy:"kind"`
+	Compilation string `psy:"compilation"`
+	StopAfter   int    `psy:"stop-after"`
+}
+
+func produceIter[T any](ctx context.Context, iter <-chan ifunny.Result[*T], stopAfter int, send func([]byte) error) error {
+	count := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case r := <-iter:
 			if r.Err != nil {
-				errs <- r.Err
-				return
+				return r.Err
 			}
 
 			if r.V == nil {
-				return
+				return nil // End of iterator
 			}
 
 			b, err := json.Marshal(r.V)
 			if err != nil {
-				errs <- err
-				return
+				return err
 			}
 
-			send <- b
-		}
-	}
+			if err := send(b); err != nil {
+				return err
+			}
 
-	for i := 0; i < stopAfter; i++ {
-		r := <-iter
-		if r.Err != nil {
-			errs <- r.Err
-			return
+			count++
+			if stopAfter > 0 && count >= stopAfter {
+				return nil
+			}
 		}
-
-		if r.V == nil {
-			return
-		}
-
-		b, err := json.Marshal(r.V)
-		if err != nil {
-			errs <- err
-			return
-		}
-
-		send <- b
 	}
 }
 
-func produceComments(parse sdk.Parser) (sdk.Producer, error) {
+// Comments Producer
+type commentsProducer struct {
+	client  *ifunny.Client
+	content string
+}
+
+func (p *commentsProducer) Start(ctx context.Context, send func([]byte) error) error {
+	iter := p.client.IterComments(p.content)
+	return produceIter(ctx, iter, 0, send)
+}
+
+func (p *commentsProducer) Stop() error {
+	return nil
+}
+
+// Feed Producer
+type feedProducer struct {
+	client    *ifunny.Client
+	feed      string
+	timeline  string
+	stopAfter int
+}
+
+func (p *feedProducer) Start(ctx context.Context, send func([]byte) error) error {
+	if p.timeline != "" {
+		iter := p.client.IterTimeline(p.timeline)
+		return produceIter(ctx, iter, p.stopAfter, send)
+	} else if p.feed != "" {
+		iter := p.client.IterFeed(p.feed)
+		return produceIter(ctx, iter, p.stopAfter, send)
+	}
+	return fmt.Errorf("exactly one of feed or timeline is required")
+}
+
+func (p *feedProducer) Stop() error {
+	return nil
+}
+
+// Explore Producer
+type exploreProducer struct {
+	client      *ifunny.Client
+	kind        string
+	compilation string
+	stopAfter   int
+}
+
+func (p *exploreProducer) Start(ctx context.Context, send func([]byte) error) error {
+	switch p.kind {
+	case "content":
+		iter := p.client.IterExploreContent(p.compilation)
+		return produceIter(ctx, iter, p.stopAfter, send)
+	case "user":
+		iter := p.client.IterExploreUser(p.compilation)
+		return produceIter(ctx, iter, p.stopAfter, send)
+	case "chat":
+		iter := p.client.IterExploreChatChannel(p.compilation)
+		return produceIter(ctx, iter, p.stopAfter, send)
+	default:
+		return fmt.Errorf("unknown explore data kind: %s", p.kind)
+	}
+}
+
+func (p *exploreProducer) Stop() error {
+	return nil
+}
+
+// Provider types
+type commentsProvider struct{}
+
+func (commentsProvider) ProvideProducer(parse sdk.Parser) (sdk.Producer, error) {
 	config := new(commentConfig)
 	if err := parse(config); err != nil {
 		return nil, err
@@ -75,21 +147,15 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	iter := client.IterComments(config.Content)
-	return func(send chan<- []byte, errs chan<- error) {
-		produceIter(iter, 0, send, errs)
+	return &commentsProducer{
+		client:  client,
+		content: config.Content,
 	}, nil
 }
 
-type feedConfig struct {
-	BearerToken string `psy:"bearer-token"`
-	UserAgent   string `psy:"user-agent"`
-	Feed        string `psy:"feed"`
-	Timeline    string `psy:"timeline"`
-	StopAfter   int    `psy:"stop-after"`
-}
+type feedProvider struct{}
 
-func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
+func (feedProvider) ProvideProducer(parse sdk.Parser) (sdk.Producer, error) {
 	config := new(feedConfig)
 	if err := parse(config); err != nil {
 		return nil, err
@@ -100,29 +166,17 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	switch {
-	case config.Timeline != "":
-		return func(send chan<- []byte, errs chan<- error) {
-			produceIter(client.IterTimeline(config.Timeline), config.StopAfter, send, errs)
-		}, nil
-	case config.Feed != "":
-		return func(send chan<- []byte, errs chan<- error) {
-			produceIter(client.IterFeed(config.Feed), config.StopAfter, send, errs)
-		}, nil
-	default:
-		return nil, fmt.Errorf("exactly one of feed or timeline is required")
-	}
+	return &feedProducer{
+		client:    client,
+		feed:      config.Feed,
+		timeline:  config.Timeline,
+		stopAfter: config.StopAfter,
+	}, nil
 }
 
-type exploreConfig struct {
-	BearerToken string `psy:"bearer-token"`
-	UserAgent   string `psy:"user-agent"`
-	Kind        string `psy:"kind"`
-	Compilation string `psy:"compilation"`
-	StopAfter   int    `psy:"stop-after"`
-}
+type exploreProvider struct{}
 
-func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
+func (exploreProvider) ProvideProducer(parse sdk.Parser) (sdk.Producer, error) {
 	config := new(exploreConfig)
 	if err := parse(config); err != nil {
 		return nil, err
@@ -133,20 +187,14 @@ func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	switch config.Kind {
-	case "content":
-		return func(send chan<- []byte, errs chan<- error) {
-			produceIter(client.IterExploreContent(config.Compilation), config.StopAfter, send, errs)
-		}, nil
-	case "user":
-		return func(send chan<- []byte, errs chan<- error) {
-			produceIter(client.IterExploreUser(config.Compilation), config.StopAfter, send, errs)
-		}, nil
-	case "chat":
-		return func(send chan<- []byte, errs chan<- error) {
-			produceIter(client.IterExploreChatChannel(config.Compilation), config.StopAfter, send, errs)
-		}, nil
-	default:
-		return nil, fmt.Errorf("unknown explore data kind: %s", config.Kind)
-	}
+	return &exploreProducer{
+		client:      client,
+		kind:        config.Kind,
+		compilation: config.Compilation,
+		stopAfter:   config.StopAfter,
+	}, nil
 }
+
+var CommentsProducer = commentsProvider{}
+var FeedProducer = feedProvider{}
+var ExploreProducer = exploreProvider{}
