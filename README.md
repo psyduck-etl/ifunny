@@ -46,31 +46,69 @@ live websocket subscription cleanly (a live subscription has no natural end).
 
 ## The discovery graph
 
-Every producer emits one JSON entity per record; every transformer maps one
-entity to another. The join keys below are the fields you extract (with the
-stdlib `zoom`/`snippet` transformers, or `ifunny-author`) to seed the next
-producer.
+### Explain-it-like-I'm-five
 
-```
-                 ┌─────────────► ifunny-timeline ──┐
-                 │  (user id/nick)                  │
-     ifunny-author / creator.id                     ▼
-   ┌──────────────┴─────────┐                    Content ──────┐
-   │                        │        content.id                │
-Comment                   User ◄───── ifunny-smiles            │
-   ▲   ▲                    ▲  ▲       ifunny-republishers      │
-   │   │  content.id +      │  │                                │
-   │   │  comment.id        │  │ user.id                        │
-   │   └── ifunny-replies   │  └── ifunny-subscribers           │
-   │                        │      ifunny-subscriptions         │
-   └── ifunny-comments ◄────┴────────────────────────── content.id
-              (content.id)
+It's following breadcrumbs. You start somewhere public — a **feed**, an
+**explore** page, or a list of **chat channels** — and that hands you posts,
+users, or rooms. From there every step points you at more entities:
 
-  ifunny-explore / ifunny-feed ─► Content, User, or ChatChannel  (seeds)
-  ifunny-channels ─► ChatChannel ──channel name──► ifunny-chat-history
-                                                    ifunny-chat-listen ─► ChatEvent
-                                                    (ifunny-author ─► User)
+- From a **post** you can reach the people who commented, smiled, or reposted
+  it, and the comments themselves.
+- From a **person** you can reach their posts (their timeline) and who follows
+  them / who they follow.
+- From a **chat room** you can reach its messages, and every message points
+  back at the person who sent it.
+
+Every *person* you turn up is a fresh starting point, so the graph keeps
+feeding itself: posts → people → their posts → their commenters → … The
+`ifunny-author` step is the glue — it turns a post, comment, or chat message
+into the `{id, nick}` of the person behind it. The `ifunny-lookup-*` steps do
+the opposite of discovery: they swap a lightweight reference (just an id or a
+channel name) for the full object when you need all of its fields.
+
+### The map
+
+Boxes are entities (what flows through the pipeline as JSON); edges are the
+producers/transformers that take you from one to the next.
+
+```mermaid
+flowchart LR
+    F([ifunny-feed]):::seed --> Content
+    E([ifunny-explore]):::seed --> Content
+    E --> User
+    E --> Channel
+    CH([ifunny-channels]):::seed --> Channel
+
+    Content -- ifunny-comments --> Comment
+    Content -- ifunny-smiles --> User
+    Content -- ifunny-republishers --> User
+    Content -- ifunny-author --> User
+
+    Comment -- ifunny-replies --> Comment
+    Comment -- ifunny-author --> User
+
+    User -- ifunny-timeline --> Content
+    User -- ifunny-subscribers --> User
+    User -- ifunny-subscriptions --> User
+
+    Channel -- ifunny-chat-history --> Event
+    Channel -- ifunny-chat-listen --> Event
+    Event -- ifunny-author --> User
+
+    Content{{Content}}
+    Comment{{Comment}}
+    User{{User}}
+    Channel{{ChatChannel}}
+    Event{{ChatEvent}}
+
+    classDef seed fill:#fff3c4,stroke:#b8860b,color:#000;
 ```
+
+The join key on each edge is the field you extract from the upstream entity
+(with the stdlib `zoom`/`snippet` transformers, or `ifunny-author`) to
+parameterize the next producer — e.g. `Content.id` seeds `ifunny-comments`,
+`Content.creator.id` (via `ifunny-author`) seeds `ifunny-timeline`. See the
+per-resource "Chain in from" column below.
 
 ## Producers
 
@@ -95,7 +133,9 @@ addition to the shared `bearer-token` / `user-agent`.
 Notes:
 
 - **`ifunny-feed`** `feed` names a global feed such as `featured` or
-  `collective`.
+  `collective`. (iFunny serves the `collective` feed over `POST` where every
+  other feed is a `GET`; the client handles that quirk, so `feed =
+  "collective"` just works.)
 - **`ifunny-timeline`** pulls a user's posts. `by-nick = true` treats `user`
   as a nick rather than an id.
 - **`ifunny-explore`** `kind` is one of `content`, `user`, `chat` and must
