@@ -26,15 +26,28 @@ constraint of Go plugins.
 
 ## Authentication
 
-Every API-backed resource requires:
+Every API-backed resource takes a `user-agent` plus exactly one of three auth
+modes:
 
-| Option | Description |
-| --- | --- |
-| `bearer-token` | OAuth bearer token to authenticate with |
-| `user-agent` | user agent to make requests as |
+| Option | Type | Access |
+| --- | --- | --- |
+| `bearer-token` | string | A logged-in user's OAuth token — full access. **Required by the chat resources** (`ifunny-chat-*`), whose WAMP connection authenticates with a bearer ticket. |
+| `basic-token` | string | An already-generated-and-primed anonymous basic token — read-only access to the public REST endpoints. |
+| `generate-basic` | bool | Mint and prime a fresh basic token at startup instead of supplying one. Priming is a one-time ~15s handshake against the API. |
 
-Both are typically wired from the environment, e.g. `bearer-token =
-env.IFUNNY_BEARER`.
+Tokens are typically wired from the environment, e.g. `bearer-token =
+env.IFUNNY_BEARER`. If more than one is set, the priority is
+`bearer-token` → `basic-token` → `generate-basic`.
+
+A **basic token** is iFunny's anonymous credential: a base64 value derived
+from a random UUID and the app client id/secret, then "primed" by one
+authenticated call before it grants read access. It covers the REST discovery
+producers and lookups but **not** the chat resources.
+
+> Status: the basic-token modes are wired to their intended `ifunny-go`
+> client API (`GenerateBasic` / `PrimeBasic` / `MakeClientBasic`), which is
+> not in the released client yet — see the ifunny-go TODO comment on the PR.
+> Until it lands the basic paths do not compile; the bearer path is complete.
 
 ## Rate limiting and cutoffs
 
@@ -113,7 +126,7 @@ per-resource "Chain in from" column below.
 ## Producers
 
 All producers emit JSON entities from the iFunny API. Options listed are in
-addition to the shared `bearer-token` / `user-agent`.
+addition to the shared auth options (see [Authentication](#authentication)).
 
 | Resource | Options | Emits | Chain in from |
 | --- | --- | --- | --- |

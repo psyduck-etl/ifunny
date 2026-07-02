@@ -106,7 +106,7 @@ func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 }
 
 type lookupUserConfig struct {
-	clientConfig
+	authConfig
 	ByNick bool `psy:"by-nick"`
 }
 
@@ -116,7 +116,7 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}

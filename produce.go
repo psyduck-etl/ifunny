@@ -39,7 +39,7 @@ func produceIter[T any](iter <-chan ifunny.Result[*T], send chan<- []byte, errs 
 }
 
 type feedConfig struct {
-	clientConfig
+	authConfig
 	Feed string `psy:"feed"`
 }
 
@@ -49,7 +49,7 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type timelineConfig struct {
-	clientConfig
+	authConfig
 	User   string `psy:"user"`
 	ByNick bool   `psy:"by-nick"`
 }
@@ -71,7 +71,7 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type exploreConfig struct {
-	clientConfig
+	authConfig
 	Compilation string `psy:"compilation"`
 	Kind        string `psy:"kind"`
 }
@@ -97,7 +97,7 @@ func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type contentConfig struct {
-	clientConfig
+	authConfig
 	Content string `psy:"content"`
 }
 
@@ -131,7 +131,7 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type repliesConfig struct {
-	clientConfig
+	authConfig
 	Content string `psy:"content"`
 	Comment string `psy:"comment"`
 }
@@ -158,7 +158,7 @@ func produceReplies(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func produceSmiles(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type userConfig struct {
-	clientConfig
+	authConfig
 	User string `psy:"user"`
 }
 
@@ -211,7 +211,7 @@ func produceSubscribers(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func produceSubscriptions(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func produceSubscriptions(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type channelsConfig struct {
-	clientConfig
+	authConfig
 	Query string `psy:"query"`
 }
 
@@ -248,7 +248,7 @@ func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}

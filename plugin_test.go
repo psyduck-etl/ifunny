@@ -75,6 +75,18 @@ func TestPluginAssembly(t *testing.T) {
 	}
 }
 
+func TestClientSpecsAuthModes(t *testing.T) {
+	names := make(map[string]bool)
+	for _, s := range clientSpecs() {
+		names[s.Name] = true
+	}
+	for _, want := range []string{"bearer-token", "basic-token", "generate-basic", "user-agent"} {
+		if !names[want] {
+			t.Errorf("clientSpecs missing auth spec %q", want)
+		}
+	}
+}
+
 func TestExtractAuthor(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

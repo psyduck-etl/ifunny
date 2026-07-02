@@ -10,7 +10,7 @@ import (
 )
 
 type chatConfig struct {
-	clientConfig
+	authConfig
 	Channel string `psy:"channel"`
 }
 
@@ -23,7 +23,7 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 }
 
 type chatListenConfig struct {
-	clientConfig
+	authConfig
 	Channel   string `psy:"channel"`
 	StopAfter int    `psy:"stop-after"`
 }
@@ -62,7 +62,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	client, err := ifunny.MakeClient(config.BearerToken, config.UserAgent)
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
