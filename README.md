@@ -165,6 +165,7 @@ Notes:
 | Resource | Options | In → Out |
 | --- | --- | --- |
 | `ifunny-author` | — | Content / Comment / ChatEvent → `{id, nick}` |
+| `ifunny-tags` | — | Content → `{"tags": [...]}` |
 | `ifunny-lookup-content` | — | `{id}` → full Content |
 | `ifunny-lookup-user` | `by-nick` | `{id}` (or `{nick}`) → full User |
 | `ifunny-lookup-channel` | — | `{name}` → full ChatChannel |
@@ -173,6 +174,9 @@ Notes:
   one — content (`creator`), comments and chat events (`user`) — emitting the
   `{id, nick}` seed the user-oriented producers consume. Entities with no
   author are dropped from the pipeline.
+- **`ifunny-tags`** lifts a post's tag list out of a Content record as
+  `{"tags": [...]}`. Posts with no tags are dropped. See
+  [Tag aggregation](#tag-aggregation) for how this feeds a tag census.
 - **`ifunny-lookup-*`** hydrate a lightweight reference into the full entity.
   A not-found user (for `ifunny-lookup-user`) drops the datum rather than
   failing the pipeline.
@@ -201,6 +205,41 @@ See [`examples/`](./examples) for runnable pipelines:
   who smiled → their timelines.
 - [`chat-discovery`](./examples/chat-discovery/main.psy) — trending channels
   → message history → authors.
+- [`tags`](./examples/tags/main.psy) — feed → `ifunny-tags` → inspect, with the
+  `mysql` wiring sketched in comments.
+
+## Tag aggregation
+
+`ifunny-tags` is the front of a tag-census loop: pull posts from any content
+producer, lift their tags, track what's been seen in a store, and (eventually)
+feed a queue of tags worth searching. The store side is the
+[`mysql`](https://github.com/psyduck-etl/mysql) plugin:
+
+- **`mysql-table`** (consumer) `INSERT IGNORE`s a row per record — a distinct
+  set of seen tags.
+- **`mysql-filter`** (transformer) drops records already in the table and
+  passes new ones — i.e. the *newly seen* tags, which is what you'd queue up to
+  search next.
+
+One wrinkle worth knowing up front: both `mysql-table` and `mysql-filter`
+operate on **one scalar field per record** (`fields = ["tag"]` → a record
+shaped `{"tag": "cats"}`). `ifunny-tags` emits the whole list as one record
+(`{"tags": [...]}`), because a psyduck transformer is strictly one-in-one-out
+and can't fan a post's N tags into N records. So between `ifunny-tags` and the
+per-tag mysql stages you need an **explode** step — one record per tag — which
+psyduck has no primitive for yet. Options, cheapest first:
+
+1. Store the array whole (`mysql-table` with a JSON/text column) and aggregate
+   counts in SQL (`GROUP BY` over an unnested tags column).
+2. Add a fan-out capability to the psyduck core (a transformer that may emit
+   many records, or a dedicated explode block) — this is the general fix and
+   would live in `gastrodon/psyduck`.
+
+Instance **counts** ("how many times a tag has been seen") likewise aren't what
+`mysql-table` records today — `INSERT IGNORE` tracks distinct existence, not a
+tally; counting needs `INSERT … ON DUPLICATE KEY UPDATE n = n + 1` upstream in
+the `mysql` plugin. Flagging both so the census math is clear before you wire a
+database.
 
 ## Development
 

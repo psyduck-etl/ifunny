@@ -70,6 +70,33 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 	}, nil
 }
 
+// tagsTransformer lifts a post's tag list out of a Content record, emitting
+// {"tags": [...]}. Content carries its tags as a plain []string under "tags";
+// this pulls just that field so downstream stages can aggregate it. A post
+// with no tags is dropped (nil output) — an empty tag set contributes nothing
+// to a tag census.
+//
+// Note the shape: this emits the whole list as one record, because a psyduck
+// transformer is strictly one-in-one-out and cannot fan a post's N tags into
+// N records. Per-tag consumers (e.g. counting distinct tags via the mysql
+// plugin, whose mysql-table/mysql-filter operate on one scalar field per
+// record) therefore need a one-record-per-tag stream, which an explode step
+// upstream of them must provide — see the README.
+func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
+	return func(data []byte) ([]byte, error) {
+		envelope := new(struct {
+			Tags []string `json:"tags"`
+		})
+		if err := json.Unmarshal(data, envelope); err != nil {
+			return nil, err
+		}
+		if len(envelope.Tags) == 0 {
+			return nil, nil
+		}
+		return json.Marshal(envelope)
+	}, nil
+}
+
 // lookup builds a hydration transformer: it reads an {"id": ...} envelope
 // from the input, resolves the full entity via looker, and re-emits it as
 // JSON. A nil result from looker (e.g. a not-found user) drops the datum.

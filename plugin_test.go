@@ -28,6 +28,7 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-history":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel"}},
 	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel", "stop-after"}},
 	"ifunny-author":         {sdk.TRANSFORMER, nil},
+	"ifunny-tags":           {sdk.TRANSFORMER, nil},
 	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
 	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"bearer-token", "user-agent", "by-nick"}},
 	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
@@ -179,6 +180,39 @@ func TestAuthorTransformer(t *testing.T) {
 	}
 	if dropped != nil {
 		t.Errorf("expected nil output for author-less entity, got %s", dropped)
+	}
+}
+
+func TestTagsTransformer(t *testing.T) {
+	transform, err := tagsTransformer(nil)
+	if err != nil {
+		t.Fatalf("build transformer: %v", err)
+	}
+
+	out, err := transform([]byte(`{"id":"abc","tags":["funny","cats","meme"],"type":"pic"}`))
+	if err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+
+	got := new(struct {
+		Tags []string `json:"tags"`
+	})
+	if err := json.Unmarshal(out, got); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if len(got.Tags) != 3 || got.Tags[0] != "funny" || got.Tags[2] != "meme" {
+		t.Errorf("tags = %v, want [funny cats meme]", got.Tags)
+	}
+
+	// A post with no tags is dropped.
+	for _, body := range []string{`{"id":"abc"}`, `{"id":"abc","tags":[]}`} {
+		dropped, err := transform([]byte(body))
+		if err != nil {
+			t.Fatalf("transform %s: %v", body, err)
+		}
+		if dropped != nil {
+			t.Errorf("expected nil output for %s, got %s", body, dropped)
+		}
 	}
 }
 

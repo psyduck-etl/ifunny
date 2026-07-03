@@ -1,0 +1,52 @@
+# feed -> tags
+#
+# Pull posts from a feed and lift their tag lists out with ifunny-tags. Here
+# the tags just go to inspect; the commented mysql wiring shows where a tag
+# census would plug in.
+#
+# NOTE: mysql-table / mysql-filter operate on one scalar field per record
+# (e.g. {"tag": "cats"}), while ifunny-tags emits the whole list as one record
+# ({"tags": [...]}). Bridging the two needs a one-record-per-tag "explode"
+# step, which psyduck has no primitive for yet — see the README's
+# "Tag aggregation" section.
+
+plugin "ifunny" {
+  source = "https://github.com/psyduck-etl/ifunny"
+}
+
+# plugin "mysql" {
+#   source = "https://github.com/psyduck-etl/mysql"
+# }
+
+produce "ifunny-feed" "featured" {
+  bearer-token = env.IFUNNY_BEARER
+  user-agent   = env.IFUNNY_USER_AGENT
+  feed         = "featured"
+  stop-after   = 50
+}
+
+transform "ifunny-tags" "tags" {}
+
+transform "inspect" "inspect" {}
+
+consume "trash" "trash" {}
+
+pipeline "post-tags" {
+  produce   = [produce.ifunny-feed.featured]
+  transform = [transform.ifunny-tags.tags, transform.inspect.inspect]
+  consume   = [consume.trash.trash]
+}
+
+# --- where a tag census would go once an explode step exists ---
+#
+# consume "mysql-table" "seen-tags" {
+#   connection = env.MYSQL_DSN
+#   table      = "tags"
+#   fields     = ["tag"]        # expects records like {"tag": "cats"}
+# }
+#
+# pipeline "census" {
+#   produce   = [produce.ifunny-feed.featured]
+#   transform = [transform.ifunny-tags.tags /*, explode-per-tag */]
+#   consume   = [consume.mysql-table.seen-tags]
+# }

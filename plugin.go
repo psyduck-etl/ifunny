@@ -191,6 +191,11 @@ func Plugin() sdk.Plugin {
 			ProvideTransformer: authorTransformer,
 		},
 		&sdk.Resource{
+			Name:               "ifunny-tags",
+			Kinds:              sdk.TRANSFORMER,
+			ProvideTransformer: tagsTransformer,
+		},
+		&sdk.Resource{
 			Name:               "ifunny-lookup-content",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: lookupContent,
