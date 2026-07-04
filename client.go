@@ -25,27 +25,31 @@ type authConfig struct {
 
 // clientFor builds an authenticated iFunny client for the chosen auth mode.
 //
-// NOTE: the basic paths call ifunny-go APIs that the released client does
-// not expose yet — ifunny.GenerateBasic, ifunny.PrimeBasic, and
-// ifunny.MakeClientBasic. They are written here to the intended interface;
-// the upstream work is tracked in the ifunny-go TODO comment on PR #2. Until
-// that ships, only the bearer path compiles — this is deliberate: the plugin
-// expresses the target shape and ifunny-go catches up.
+// The basic paths use ifunny-go's basic-token API (ifunny.GenerateBasic,
+// ifunny.MakeClientBasic, and (*Client).PrimeBasic), which lands in ifunny-go
+// via open-ifunny/ifunny-go#2. Until that release is pinned in go.mod, the
+// basic paths don't compile — deliberate; the bearer path is complete.
 func clientFor(config *authConfig) (*ifunny.Client, error) {
 	switch {
 	case config.BearerToken != "":
 		return ifunny.MakeClient(config.BearerToken, config.UserAgent)
 	case config.BasicToken != "":
+		// A basic-token supplied in config is assumed already primed.
 		return ifunny.MakeClientBasic(config.BasicToken, config.UserAgent)
 	case config.GenerateBasic:
 		basic, err := ifunny.GenerateBasic()
 		if err != nil {
 			return nil, fmt.Errorf("generate basic token: %w", err)
 		}
-		if err := ifunny.PrimeBasic(basic, config.UserAgent); err != nil {
+		client, err := ifunny.MakeClientBasic(basic, config.UserAgent)
+		if err != nil {
+			return nil, err
+		}
+		// A freshly generated token must be primed once before use.
+		if err := client.PrimeBasic(); err != nil {
 			return nil, fmt.Errorf("prime basic token: %w", err)
 		}
-		return ifunny.MakeClientBasic(basic, config.UserAgent)
+		return client, nil
 	default:
 		return nil, fmt.Errorf("one of bearer-token, basic-token, or generate-basic is required")
 	}
