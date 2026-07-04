@@ -3,7 +3,7 @@ module github.com/psyduck-etl/ifunny
 go 1.22.1
 
 require (
-	github.com/open-ifunny/ifunny-go v0.0.10
+	github.com/open-ifunny/ifunny-go v0.0.11-0.20260704014625-d61be7d871e8
 	github.com/psyduck-etl/sdk v0.5.0
 )
 
