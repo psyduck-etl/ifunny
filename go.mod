@@ -1,6 +1,8 @@
 module github.com/psyduck-etl/ifunny
 
-go 1.22.1
+go 1.24.0
+
+toolchain go1.24.13
 
 require (
 	github.com/open-ifunny/ifunny-go v0.0.10
