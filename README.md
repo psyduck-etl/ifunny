@@ -44,11 +44,6 @@ from a random UUID and the app client id/secret, then "primed" by one
 authenticated call before it grants read access. It covers the REST discovery
 producers and lookups but **not** the chat resources.
 
-> Status: the basic-token modes are wired to their intended `ifunny-go`
-> client API (`GenerateBasic` / `PrimeBasic` / `MakeClientBasic`), which is
-> not in the released client yet — see the ifunny-go TODO comment on the PR.
-> Until it lands the basic paths do not compile; the bearer path is complete.
-
 ## Rate limiting and cutoffs
 
 `per-minute` and `stop-after` are **host-owned** block attributes under SDK

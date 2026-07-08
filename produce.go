@@ -78,7 +78,7 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 
 	return func(send chan<- []byte, errs chan<- error) {
 		if config.ByNick {
-			pageInto(client, "content", "/timelines/users/by_nick/"+config.User, send, errs)
+			produceIter(client.IterTimelineByNick(config.User), send, errs)
 		} else {
 			produceIter(client.IterTimeline(config.User), send, errs)
 		}
@@ -164,7 +164,7 @@ func produceReplies(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		pageInto(client, "replies", "/content/"+config.Content+"/comments/"+config.Comment+"/replies", send, errs)
+		produceIter(client.IterReplies(config.Content, config.Comment), send, errs)
 	}, nil
 }
 
@@ -180,7 +180,7 @@ func produceSmiles(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		pageInto(client, "users", "/content/"+config.Content+"/smiles", send, errs)
+		produceIter(client.IterSmiles(config.Content), send, errs)
 	}, nil
 }
 
@@ -196,7 +196,7 @@ func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		pageInto(client, "users", "/content/"+config.Content+"/republished", send, errs)
+		produceIter(client.IterRepublishers(config.Content), send, errs)
 	}, nil
 }
 
@@ -217,7 +217,7 @@ func produceSubscribers(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		pageInto(client, "users", "/users/"+config.User+"/subscribers", send, errs)
+		produceIter(client.IterSubscribers(config.User), send, errs)
 	}, nil
 }
 
@@ -233,7 +233,7 @@ func produceSubscriptions(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		pageInto(client, "users", "/users/"+config.User+"/subscriptions", send, errs)
+		produceIter(client.IterSubscriptions(config.User), send, errs)
 	}, nil
 }
 

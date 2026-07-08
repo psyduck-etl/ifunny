@@ -24,24 +24,22 @@ type authConfig struct {
 }
 
 // clientFor builds an authenticated iFunny client for the chosen auth mode.
-//
-// The basic paths use ifunny-go's basic-token API (ifunny.GenerateBasic,
-// ifunny.MakeClientBasic, and (*Client).PrimeBasic), which lands in ifunny-go
-// via open-ifunny/ifunny-go#2. Until that release is pinned in go.mod, the
-// basic paths don't compile — deliberate; the bearer path is complete.
+// UserAgent is a plain string in psyduck config; ifunny-go takes a UserAgent
+// interface, so we wrap through RawUserAgent at the boundary.
 func clientFor(config *authConfig) (*ifunny.Client, error) {
+	ua := ifunny.RawUserAgent(config.UserAgent)
 	switch {
 	case config.BearerToken != "":
-		return ifunny.MakeClient(config.BearerToken, config.UserAgent)
+		return ifunny.MakeClient(config.BearerToken, ua)
 	case config.BasicToken != "":
 		// A basic-token supplied in config is assumed already primed.
-		return ifunny.MakeClientBasic(config.BasicToken, config.UserAgent)
+		return ifunny.MakeClientBasic(config.BasicToken, ua)
 	case config.GenerateBasic:
 		basic, err := ifunny.GenerateBasic()
 		if err != nil {
 			return nil, fmt.Errorf("generate basic token: %w", err)
 		}
-		client, err := ifunny.MakeClientBasic(basic, config.UserAgent)
+		client, err := ifunny.MakeClientBasic(basic, ua)
 		if err != nil {
 			return nil, err
 		}

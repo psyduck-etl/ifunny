@@ -51,7 +51,7 @@ type chatListenConfig struct {
 // declares its own stop-after to bound the listen and unsubscribe cleanly.
 // A stop-after of 0 listens until the process exits.
 //
-// OnChanneEvent delivers events on the websocket's goroutine via a
+// OnChannelEvent delivers events on the websocket's goroutine via a
 // callback. We bridge those onto an internal channel and marshal them on
 // the producer goroutine. A done channel lets the callback abandon a send
 // the moment we stop, so a late event can never block on a listener that
@@ -79,7 +79,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		events := make(chan *ifunny.ChatEvent)
 		done := make(chan struct{})
 
-		unsubscribe, err := chat.OnChanneEvent(config.Channel, func(event *ifunny.ChatEvent) error {
+		unsubscribe, err := chat.OnChannelEvent(config.Channel, func(event *ifunny.ChatEvent) error {
 			select {
 			case events <- event:
 			case <-done:

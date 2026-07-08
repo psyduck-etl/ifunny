@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
 	"github.com/open-ifunny/ifunny-go/compose"
@@ -167,10 +166,8 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 
 		user, err := client.GetUser(req)
 		if err != nil {
-			// A missing user is not a pipeline error — drop the datum. The
-			// client returns API errors as *ifunny.APIError.
-			var apiErr *ifunny.APIError
-			if errors.As(err, &apiErr) && apiErr.Kind == "not_found" {
+			// A missing user is not a pipeline error — drop the datum.
+			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
 			}
 			return nil, err
