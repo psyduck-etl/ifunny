@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -58,8 +59,8 @@ func extractAuthor(data []byte) (authorRef, bool, error) {
 // Content, Comment, or ChatEvent to its {id, nick} author reference —
 // the seed shape the user-oriented producers (ifunny-timeline,
 // ifunny-subscribers, ...) accept. An entity with no resolvable author is
-// dropped from the pipeline (nil output), which the host treats as "skip
-// this datum".
+// dropped from the pipeline (simply not written to out), which the host
+// treats as "skip this datum".
 //
 // Takes no config — the transformer is a pure JSON reshape.
 //
@@ -67,15 +68,45 @@ func extractAuthor(data []byte) (authorRef, bool, error) {
 //
 //	transform "ifunny-author" "author" {}
 func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
-	return func(data []byte) ([]byte, error) {
-		author, ok, err := extractAuthor(data)
-		if err != nil {
-			return nil, err
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				author, found, err := extractAuthor(data)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				if !found {
+					// Drop entities with no resolvable author.
+					continue
+				}
+				marshalled, err := json.Marshal(author)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case out <- marshalled:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
-		if !ok {
-			return nil, nil
-		}
-		return json.Marshal(author)
 	}, nil
 }
 
@@ -83,7 +114,8 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 // tag list out of a Content record, emitting {"tags": [...]}. Content
 // carries its tags as a plain []string under "tags"; this pulls just that
 // field so downstream stages can aggregate it. A post with no tags is
-// dropped (nil output) — an empty tag set contributes nothing to a census.
+// dropped (simply not written to out) — an empty tag set contributes nothing
+// to a census.
 //
 // Note the shape: this emits the whole list as one record, because a
 // psyduck transformer is strictly one-in-one-out and cannot fan a post's
@@ -98,17 +130,47 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 //
 //	transform "ifunny-tags" "tags" {}
 func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
-	return func(data []byte) ([]byte, error) {
-		envelope := new(struct {
-			Tags []string `json:"tags"`
-		})
-		if err := json.Unmarshal(data, envelope); err != nil {
-			return nil, err
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				envelope := new(struct {
+					Tags []string `json:"tags"`
+				})
+				if err := json.Unmarshal(data, envelope); err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				if len(envelope.Tags) == 0 {
+					// Drop posts with no tags.
+					continue
+				}
+				marshalled, err := json.Marshal(envelope)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case out <- marshalled:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
-		if len(envelope.Tags) == 0 {
-			return nil, nil
-		}
-		return json.Marshal(envelope)
 	}, nil
 }
 
@@ -116,23 +178,58 @@ func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
 // from the input, resolves the full entity via looker, and re-emits it as
 // JSON. A nil result from looker (e.g. a not-found user) drops the datum.
 func lookup(looker func(id string) (any, error)) sdk.Transformer {
-	return func(data []byte) ([]byte, error) {
-		identity := new(struct {
-			ID string `json:"id"`
-		})
-		if err := json.Unmarshal(data, identity); err != nil {
-			return nil, err
-		}
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				identity := new(struct {
+					ID string `json:"id"`
+				})
+				if err := json.Unmarshal(data, identity); err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
 
-		found, err := looker(identity.ID)
-		if err != nil {
-			return nil, err
-		}
-		if found == nil {
-			return nil, nil
-		}
+				found, err := looker(identity.ID)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				if found == nil {
+					// Drop entities where the looker returns nil.
+					continue
+				}
 
-		return json.Marshal(found)
+				marshalled, err := json.Marshal(found)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case out <- marshalled:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
 	}
 }
 
@@ -223,30 +320,64 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 	// The input's "id" or "nick" field keys the lookup depending on which
 	// mode is set. Author refs carry both, so either mode chains off the
 	// same upstream datum.
-	return func(data []byte) ([]byte, error) {
-		identity := new(struct {
-			ID   string `json:"id"`
-			Nick string `json:"nick"`
-		})
-		if err := json.Unmarshal(data, identity); err != nil {
-			return nil, err
-		}
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				identity := new(struct {
+					ID   string `json:"id"`
+					Nick string `json:"nick"`
+				})
+				if err := json.Unmarshal(data, identity); err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
 
-		req := compose.UserByID(identity.ID)
-		if config.ByNick {
-			req = compose.UserByNick(identity.Nick)
-		}
+				req := compose.UserByID(identity.ID)
+				if config.ByNick {
+					req = compose.UserByNick(identity.Nick)
+				}
 
-		user, err := client.GetUser(req)
-		if err != nil {
-			// A missing user is not a pipeline error — drop the datum.
-			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
-				return nil, nil
+				user, err := client.GetUser(req)
+				if err != nil {
+					// A missing user is not a pipeline error — drop the datum.
+					if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
+						continue
+					}
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+
+				marshalled, err := json.Marshal(user)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case out <- marshalled:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
 			}
-			return nil, err
 		}
-
-		return json.Marshal(user)
 	}, nil
 }
 
@@ -279,22 +410,57 @@ func lookupChannel(parse sdk.Parser) (sdk.Transformer, error) {
 
 	// Channels are keyed by name, not a numeric id, so this reads the
 	// "name" field rather than going through the shared lookup helper.
-	return func(data []byte) ([]byte, error) {
-		identity := new(struct {
-			Name string `json:"name"`
-		})
-		if err := json.Unmarshal(data, identity); err != nil {
-			return nil, err
-		}
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				identity := new(struct {
+					Name string `json:"name"`
+				})
+				if err := json.Unmarshal(data, identity); err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
 
-		channel, err := chat.GetChannel(compose.GetChannel(identity.Name))
-		if err != nil {
-			return nil, err
-		}
-		if channel == nil {
-			return nil, nil
-		}
+				channel, err := chat.GetChannel(compose.GetChannel(identity.Name))
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				if channel == nil {
+					// Drop channels not found.
+					continue
+				}
 
-		return json.Marshal(channel)
+				marshalled, err := json.Marshal(channel)
+				if err != nil {
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case out <- marshalled:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
 	}, nil
 }

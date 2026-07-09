@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 
@@ -50,9 +51,9 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	return func(send chan<- []byte, errs chan<- error) {
+	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		iter := chat.IterMessages(compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
-		produceIter(iter, send, errs)
+		produceIter(ctx, iter, send, errs)
 	}, nil
 }
 
@@ -108,9 +109,8 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	return func(send chan<- []byte, errs chan<- error) {
+	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		defer close(send)
-		defer close(errs)
 
 		events := make(chan *ifunny.ChatEvent)
 		done := make(chan struct{})
@@ -123,7 +123,10 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			errs <- err
+			select {
+			case errs <- err:
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -142,16 +145,26 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			case event := <-events:
 				b, err := json.Marshal(event)
 				if err != nil {
-					errs <- err
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
 					return
 				}
-				send <- b
+				select {
+				case send <- b:
+				case <-ctx.Done():
+					return
+				}
 
 				count++
 				if config.StopAfter > 0 && count >= config.StopAfter {
 					return
 				}
 			case <-done:
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -205,9 +218,8 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	return func(send chan<- []byte, errs chan<- error) {
+	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		defer close(send)
-		defer close(errs)
 
 		invites := make(chan *ifunny.ChatChannel)
 		done := make(chan struct{})
@@ -220,7 +232,10 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			errs <- err
+			select {
+			case errs <- err:
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -239,16 +254,26 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			case channel := <-invites:
 				b, err := json.Marshal(channel)
 				if err != nil {
-					errs <- err
+					select {
+					case errs <- err:
+					case <-ctx.Done():
+						return
+					}
 					return
 				}
-				send <- b
+				select {
+				case send <- b:
+				case <-ctx.Done():
+					return
+				}
 
 				count++
 				if config.StopAfter > 0 && count >= config.StopAfter {
 					return
 				}
 			case <-done:
+				return
+			case <-ctx.Done():
 				return
 			}
 		}

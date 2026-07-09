@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -161,26 +162,44 @@ func TestAuthorTransformer(t *testing.T) {
 		t.Fatalf("build transformer: %v", err)
 	}
 
-	out, err := transform([]byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
+	// Test with an entity that has an author.
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 1)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`)
+	close(in)
+
+	transform(context.Background(), in, out, errs)
+
+	result, ok := <-out
+	if !ok {
+		t.Fatal("expected out to be readable")
+	}
+	if _, ok := <-out; ok {
+		t.Fatal("expected out to be closed")
 	}
 
 	got := new(authorRef)
-	if err := json.Unmarshal(out, got); err != nil {
+	if err := json.Unmarshal(result, got); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
 	if got.ID != "u1" || got.Nick != "alice" {
 		t.Errorf("output = %+v, want id=u1 nick=alice", got)
 	}
 
-	// An entity with no author is dropped from the pipeline.
-	dropped, err := transform([]byte(`{"id":"abc"}`))
-	if err != nil {
-		t.Fatalf("transform no-author: %v", err)
-	}
-	if dropped != nil {
-		t.Errorf("expected nil output for author-less entity, got %s", dropped)
+	// Test with an entity that has no author (should be dropped).
+	in2 := make(chan []byte, 1)
+	out2 := make(chan []byte, 1)
+	errs2 := make(chan error, 1)
+
+	in2 <- []byte(`{"id":"abc"}`)
+	close(in2)
+
+	transform(context.Background(), in2, out2, errs2)
+
+	if _, ok := <-out2; ok {
+		t.Errorf("expected no output for author-less entity, but got data")
 	}
 }
 
@@ -190,15 +209,28 @@ func TestTagsTransformer(t *testing.T) {
 		t.Fatalf("build transformer: %v", err)
 	}
 
-	out, err := transform([]byte(`{"id":"abc","tags":["funny","cats","meme"],"type":"pic"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
+	// Test with a post that has tags.
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 1)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"abc","tags":["funny","cats","meme"],"type":"pic"}`)
+	close(in)
+
+	transform(context.Background(), in, out, errs)
+
+	result, ok := <-out
+	if !ok {
+		t.Fatal("expected out to be readable")
+	}
+	if _, ok := <-out; ok {
+		t.Fatal("expected out to be closed")
 	}
 
 	got := new(struct {
 		Tags []string `json:"tags"`
 	})
-	if err := json.Unmarshal(out, got); err != nil {
+	if err := json.Unmarshal(result, got); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
 	if len(got.Tags) != 3 || got.Tags[0] != "funny" || got.Tags[2] != "meme" {
@@ -207,12 +239,17 @@ func TestTagsTransformer(t *testing.T) {
 
 	// A post with no tags is dropped.
 	for _, body := range []string{`{"id":"abc"}`, `{"id":"abc","tags":[]}`} {
-		dropped, err := transform([]byte(body))
-		if err != nil {
-			t.Fatalf("transform %s: %v", body, err)
-		}
-		if dropped != nil {
-			t.Errorf("expected nil output for %s, got %s", body, dropped)
+		in2 := make(chan []byte, 1)
+		out2 := make(chan []byte, 1)
+		errs2 := make(chan error, 1)
+
+		in2 <- []byte(body)
+		close(in2)
+
+		transform(context.Background(), in2, out2, errs2)
+
+		if _, ok := <-out2; ok {
+			t.Errorf("expected no output for %s, but got data", body)
 		}
 	}
 }
@@ -229,16 +266,29 @@ func TestLookup(t *testing.T) {
 		return entity{ID: id, Name: "resolved"}, nil
 	})
 
-	out, err := transform([]byte(`{"id":"xyz","nick":"ignored"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 1)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"xyz","nick":"ignored"}`)
+	close(in)
+
+	transform(context.Background(), in, out, errs)
+
+	result, ok := <-out
+	if !ok {
+		t.Fatal("expected out to be readable")
 	}
+	if _, ok := <-out; ok {
+		t.Fatal("expected out to be closed")
+	}
+
 	if gotID != "xyz" {
 		t.Errorf("looker got id %q, want xyz", gotID)
 	}
 
 	got := new(entity)
-	if err := json.Unmarshal(out, got); err != nil {
+	if err := json.Unmarshal(result, got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.Name != "resolved" {
@@ -252,11 +302,16 @@ func TestLookupNilDropsDatum(t *testing.T) {
 		return nil, nil
 	})
 
-	out, err := transform([]byte(`{"id":"missing"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
-	}
-	if out != nil {
-		t.Errorf("expected nil output for nil lookup, got %s", out)
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 1)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"missing"}`)
+	close(in)
+
+	transform(context.Background(), in, out, errs)
+
+	if _, ok := <-out; ok {
+		t.Errorf("expected no output for nil lookup, but got data")
 	}
 }
