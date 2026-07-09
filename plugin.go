@@ -30,16 +30,16 @@ func Plugin() sdk.Plugin {
 			ProvideProducer: produceTimeline,
 			Spec: specs(
 				&sdk.Spec{
-					Name:        "user",
-					Description: "user whose timeline to pull, an id or (with by-nick) a nick",
+					Name:        "by-id",
+					Description: "user id whose timeline to pull; mutually exclusive with by-nick",
 					Type:        sdk.TypeString,
-					Required:    true,
+					Default:     "",
 				},
 				&sdk.Spec{
 					Name:        "by-nick",
-					Description: "treat user as a nick instead of an id",
-					Type:        sdk.TypeBool,
-					Default:     false,
+					Description: "user nick whose timeline to pull; mutually exclusive with by-id",
+					Type:        sdk.TypeString,
+					Default:     "",
 				},
 			),
 		},
@@ -183,6 +183,17 @@ func Plugin() sdk.Plugin {
 				},
 			),
 		},
+		&sdk.Resource{
+			Name:            "ifunny-chat-invites",
+			Kinds:           sdk.PRODUCER,
+			ProvideProducer: produceChatInvites,
+			Spec: specs(&sdk.Spec{
+				Name:        "stop-after",
+				Description: "stop after n received invites; 0 listens until the process exits",
+				Type:        sdk.TypeInt,
+				Default:     0,
+			}),
+		},
 
 		// --- transformers ---
 		&sdk.Resource{
@@ -205,12 +216,20 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-lookup-user",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: lookupUser,
-			Spec: specs(&sdk.Spec{
-				Name:        "by-nick",
-				Description: "look up by the input's nick field instead of its id",
-				Type:        sdk.TypeBool,
-				Default:     false,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "by-id",
+					Description: "look up by the input's id field; mutually exclusive with by-nick",
+					Type:        sdk.TypeBool,
+					Default:     false,
+				},
+				&sdk.Spec{
+					Name:        "by-nick",
+					Description: "look up by the input's nick field; mutually exclusive with by-id",
+					Type:        sdk.TypeBool,
+					Default:     false,
+				},
+			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-lookup-channel",

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
 	"github.com/open-ifunny/ifunny-go/compose"
@@ -133,6 +134,7 @@ func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 
 type lookupUserConfig struct {
 	authConfig
+	ByID   bool `psy:"by-id"`
 	ByNick bool `psy:"by-nick"`
 }
 
@@ -142,14 +144,22 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
+	// Exactly one of by-id / by-nick must be set. Requiring an explicit
+	// choice avoids surprising defaults when the upstream datum has both
+	// fields (author refs do) — id lookups and nick lookups hit different
+	// endpoints and can behave differently on edge cases (renames, etc.).
+	if config.ByID == config.ByNick {
+		return nil, fmt.Errorf("ifunny-lookup-user: exactly one of by-id or by-nick is required")
+	}
+
 	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// By id (default) the input's "id" field keys the lookup; by nick the
-	// "nick" field does. Author refs carry both, so either mode chains off
-	// the same upstream datum.
+	// The input's "id" or "nick" field keys the lookup depending on which
+	// mode is set. Author refs carry both, so either mode chains off the
+	// same upstream datum.
 	return func(data []byte) ([]byte, error) {
 		identity := new(struct {
 			ID   string `json:"id"`

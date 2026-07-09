@@ -26,18 +26,37 @@ constraint of Go plugins.
 
 ## Authentication
 
-Every API-backed resource takes a `user-agent` plus exactly one of three auth
-modes:
+Every API-backed resource takes exactly one of three auth modes:
 
 | Option | Type | Access |
 | --- | --- | --- |
 | `bearer-token` | string | A logged-in user's OAuth token — full access. **Required by the chat resources** (`ifunny-chat-*`), whose WAMP connection authenticates with a bearer ticket. |
 | `basic-token` | string | An already-generated-and-primed anonymous basic token — read-only access to the public REST endpoints. |
-| `generate-basic` | bool | Mint and prime a fresh basic token at startup instead of supplying one. Priming is a one-time ~15s handshake against the API. |
+| `generate-basic` | block | Mint and prime a fresh basic token at startup instead of supplying one. Priming is a one-time ~15s handshake against the API. |
+
+`bearer-token` and `basic-token` also need a top-level `user-agent` string.
+`generate-basic` renders the user-agent from its own fields, so the top-level
+`user-agent` is unused in that mode.
 
 Tokens are typically wired from the environment, e.g. `bearer-token =
 env.IFUNNY_BEARER`. If more than one is set, the priority is
 `bearer-token` → `basic-token` → `generate-basic`.
+
+The `generate-basic` block:
+
+```hcl
+generate-basic {
+  platform-name    = "Android"   # required, one of: Android, iOS
+  platform-version = "14"        # required, e.g. "14" (Android) or "17.5.1" (iOS)
+  app-version      = ""          # optional, defaults to ifunny-go's pinned APP_VERSION
+  app-build        = ""          # optional, defaults to ifunny-go's pinned APP_BUILD
+}
+```
+
+The block's fields render a mobile user-agent identical in shape to the ones
+`ifunny-go`'s `Android{}` / `IOS{}` types produce. Brand and model are fixed
+(`google` / `Pixel 8`, `Apple` / `iPhone 15 Pro`) — only the OS and app
+version tokens are caller-controllable.
 
 A **basic token** is iFunny's anonymous credential: a base64 value derived
 from a random UUID and the app client id/secret, then "primed" by one
@@ -86,6 +105,7 @@ flowchart LR
     E --> User
     E --> Channel
     CH([ifunny-channels]):::seed --> Channel
+    IV([ifunny-chat-invites]):::seed --> Channel
 
     Content -- ifunny-comments --> Comment
     Content -- ifunny-smiles --> User
@@ -126,7 +146,7 @@ addition to the shared auth options (see [Authentication](#authentication)).
 | Resource | Options | Emits | Chain in from |
 | --- | --- | --- | --- |
 | `ifunny-feed` | `feed` | Content | — (seed) |
-| `ifunny-timeline` | `user`, `by-nick` | Content | `User.id` (or `.nick` with `by-nick`) |
+| `ifunny-timeline` | `by-id`, `by-nick` (mutex) | Content | `User.id` or `User.nick` |
 | `ifunny-explore` | `compilation`, `kind` | Content / User / ChatChannel | — (seed) |
 | `ifunny-comments` | `content` | Comment | `Content.id` |
 | `ifunny-replies` | `content`, `comment` | Comment | `Comment.cid` + `Comment.id` |
@@ -137,6 +157,7 @@ addition to the shared auth options (see [Authentication](#authentication)).
 | `ifunny-channels` | `query` | ChatChannel | — (seed) |
 | `ifunny-chat-history` | `channel` | ChatEvent | `ChatChannel.name` |
 | `ifunny-chat-listen` | `channel`, `stop-after` | ChatEvent | `ChatChannel.name` |
+| `ifunny-chat-invites` | `stop-after` | ChatChannel | — (seed; bearer-token only) |
 
 Notes:
 
@@ -144,8 +165,9 @@ Notes:
   `collective`. (iFunny serves the `collective` feed over `POST` where every
   other feed is a `GET`; the client handles that quirk, so `feed =
   "collective"` just works.)
-- **`ifunny-timeline`** pulls a user's posts. `by-nick = true` treats `user`
-  as a nick rather than an id.
+- **`ifunny-timeline`** pulls a user's posts. Set exactly one of `by-id`
+  (a user id) or `by-nick` (a nick); the resource errors at bind time if
+  both or neither is set.
 - **`ifunny-explore`** `kind` is one of `content`, `user`, `chat` and must
   match the compilation (e.g. `content_top_today` with `content`,
   `users_top_overall` with `user`, `chats_popular_last_week` with `chat`).
@@ -154,6 +176,10 @@ Notes:
 - **`ifunny-chat-history`** backfills a channel's message history over the
   chat websocket. **`ifunny-chat-listen`** streams live events; set its
   `stop-after` to bound collection (0 listens until the process exits).
+- **`ifunny-chat-invites`** streams `ChatChannel`s the logged-in user is
+  invited to. Requires `bearer-token` (anonymous clients receive no
+  invites); shares `ifunny-chat-listen`'s locally-declared `stop-after`
+  semantics for the same reason (no natural end to a live subscription).
 
 ## Transformers
 
@@ -162,7 +188,7 @@ Notes:
 | `ifunny-author` | — | Content / Comment / ChatEvent → `{id, nick}` |
 | `ifunny-tags` | — | Content → `{"tags": [...]}` |
 | `ifunny-lookup-content` | — | `{id}` → full Content |
-| `ifunny-lookup-user` | `by-nick` | `{id}` (or `{nick}`) → full User |
+| `ifunny-lookup-user` | `by-id`, `by-nick` (mutex) | `{id}` or `{nick}` → full User |
 | `ifunny-lookup-channel` | — | `{name}` → full ChatChannel |
 
 - **`ifunny-author`** extracts the author reference from any entity that has

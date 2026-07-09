@@ -16,7 +16,7 @@ type expectedResource struct {
 
 var expectedResources = map[string]expectedResource{
 	"ifunny-feed":           {sdk.PRODUCER, []string{"bearer-token", "user-agent", "feed"}},
-	"ifunny-timeline":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "user", "by-nick"}},
+	"ifunny-timeline":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "by-id", "by-nick"}},
 	"ifunny-explore":        {sdk.PRODUCER, []string{"bearer-token", "user-agent", "compilation", "kind"}},
 	"ifunny-comments":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content"}},
 	"ifunny-replies":        {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content", "comment"}},
@@ -27,10 +27,11 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-channels":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "query"}},
 	"ifunny-chat-history":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel"}},
 	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel", "stop-after"}},
+	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "stop-after"}},
 	"ifunny-author":         {sdk.TRANSFORMER, nil},
 	"ifunny-tags":           {sdk.TRANSFORMER, nil},
 	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
-	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"bearer-token", "user-agent", "by-nick"}},
+	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"bearer-token", "user-agent", "by-id", "by-nick"}},
 	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
 }
 

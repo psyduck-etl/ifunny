@@ -61,8 +61,8 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 
 type timelineConfig struct {
 	authConfig
-	User   string `psy:"user"`
-	ByNick bool   `psy:"by-nick"`
+	ByID   string `psy:"by-id"`
+	ByNick string `psy:"by-nick"`
 }
 
 func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
@@ -71,16 +71,22 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
+	// Exactly one of by-id / by-nick must be set. Requiring both would
+	// silently favour one; requiring neither has nothing to seed on.
+	if (config.ByID == "") == (config.ByNick == "") {
+		return nil, fmt.Errorf("ifunny-timeline: exactly one of by-id or by-nick is required")
+	}
+
 	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
 
 	return func(send chan<- []byte, errs chan<- error) {
-		if config.ByNick {
-			produceIter(client.IterTimelineByNick(config.User), send, errs)
+		if config.ByNick != "" {
+			produceIter(client.IterTimelineByNick(config.ByNick), send, errs)
 		} else {
-			produceIter(client.IterTimeline(config.User), send, errs)
+			produceIter(client.IterTimeline(config.ByID), send, errs)
 		}
 	}, nil
 }

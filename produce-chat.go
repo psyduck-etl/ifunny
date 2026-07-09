@@ -9,6 +9,89 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
+type invitesConfig struct {
+	authConfig
+	StopAfter int `psy:"stop-after"`
+}
+
+// produceChatInvites streams live channel invites received by the logged-in
+// user. Like ifunny-chat-listen, the subscription has no natural end so we
+// declare stop-after locally; a stop-after of 0 listens until the process
+// exits.
+//
+// Unlike ifunny-chat-listen this is not a per-channel subscription — the
+// underlying WAMP topic delivers every invite the current user gets. Each
+// invite arrives as a *ChatChannel, which is exactly what a downstream
+// chat producer (ifunny-chat-history, ifunny-chat-listen) chains from.
+//
+// Requires a bearer-token: there is no such thing as an "invited anonymous
+// user", so basic-token / generate-basic modes have nothing to receive.
+func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
+	config := new(invitesConfig)
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	chat, err := client.Chat()
+	if err != nil {
+		return nil, err
+	}
+
+	return func(send chan<- []byte, errs chan<- error) {
+		defer close(send)
+		defer close(errs)
+
+		invites := make(chan *ifunny.ChatChannel)
+		done := make(chan struct{})
+
+		unsubscribe, err := chat.OnChannelInvite(func(_ int, channel *ifunny.ChatChannel) error {
+			select {
+			case invites <- channel:
+			case <-done:
+			}
+			return nil
+		})
+		if err != nil {
+			errs <- err
+			return
+		}
+
+		var once sync.Once
+		stop := func() {
+			once.Do(func() {
+				close(done)
+				unsubscribe()
+			})
+		}
+		defer stop()
+
+		count := 0
+		for {
+			select {
+			case channel := <-invites:
+				b, err := json.Marshal(channel)
+				if err != nil {
+					errs <- err
+					return
+				}
+				send <- b
+
+				count++
+				if config.StopAfter > 0 && count >= config.StopAfter {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}, nil
+}
+
 type chatConfig struct {
 	authConfig
 	Channel string `psy:"channel"`
