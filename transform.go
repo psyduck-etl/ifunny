@@ -54,9 +54,18 @@ func extractAuthor(data []byte) (authorRef, bool, error) {
 	return authorRef{}, false, nil
 }
 
-// authorTransformer maps a Content, Comment, or ChatEvent to its author
-// reference. An entity with no resolvable author is dropped from the
-// pipeline (nil output), which the host treats as "skip this datum".
+// authorTransformer builds the ifunny-author transformer. It maps a
+// Content, Comment, or ChatEvent to its {id, nick} author reference —
+// the seed shape the user-oriented producers (ifunny-timeline,
+// ifunny-subscribers, ...) accept. An entity with no resolvable author is
+// dropped from the pipeline (nil output), which the host treats as "skip
+// this datum".
+//
+// Takes no config — the transformer is a pure JSON reshape.
+//
+// Example (glue step between posts and their commenters' timelines):
+//
+//	transform "ifunny-author" "author" {}
 func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 	return func(data []byte) ([]byte, error) {
 		author, ok, err := extractAuthor(data)
@@ -70,18 +79,24 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 	}, nil
 }
 
-// tagsTransformer lifts a post's tag list out of a Content record, emitting
-// {"tags": [...]}. Content carries its tags as a plain []string under "tags";
-// this pulls just that field so downstream stages can aggregate it. A post
-// with no tags is dropped (nil output) — an empty tag set contributes nothing
-// to a tag census.
+// tagsTransformer builds the ifunny-tags transformer. It lifts a post's
+// tag list out of a Content record, emitting {"tags": [...]}. Content
+// carries its tags as a plain []string under "tags"; this pulls just that
+// field so downstream stages can aggregate it. A post with no tags is
+// dropped (nil output) — an empty tag set contributes nothing to a census.
 //
-// Note the shape: this emits the whole list as one record, because a psyduck
-// transformer is strictly one-in-one-out and cannot fan a post's N tags into
-// N records. Per-tag consumers (e.g. counting distinct tags via the mysql
-// plugin, whose mysql-table/mysql-filter operate on one scalar field per
-// record) therefore need a one-record-per-tag stream, which an explode step
-// upstream of them must provide — see the README.
+// Note the shape: this emits the whole list as one record, because a
+// psyduck transformer is strictly one-in-one-out and cannot fan a post's
+// N tags into N records. Per-tag consumers (e.g. counting distinct tags
+// via the mysql plugin, whose mysql-table/mysql-filter operate on one
+// scalar field per record) therefore need a one-record-per-tag stream,
+// which an explode step upstream of them must provide — see the README.
+//
+// Takes no config.
+//
+// Example:
+//
+//	transform "ifunny-tags" "tags" {}
 func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
 	return func(data []byte) ([]byte, error) {
 		envelope := new(struct {
@@ -121,6 +136,21 @@ func lookup(looker func(id string) (any, error)) sdk.Transformer {
 	}
 }
 
+// lookupContent builds the ifunny-lookup-content transformer. It hydrates
+// a light Content reference — a record whose "id" field carries the
+// content id — into the full Content object.
+//
+// Takes only the shared auth surface; the input's "id" keys the lookup.
+//
+// Example:
+//
+//	transform "ifunny-lookup-content" "hydrate" {
+//	  auth-basic = env.IFUNNY_BASIC
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	}
 func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 	client, _, err := newClient(parse)
 	if err != nil {
@@ -132,12 +162,45 @@ func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 	}), nil
 }
 
+// lookupUserConfig configures ifunny-lookup-user. Exactly one of ByID /
+// ByNick must be true — id lookups and nick lookups hit different
+// endpoints and can behave differently on edge cases like renames, so the
+// caller picks explicitly rather than the transformer defaulting.
 type lookupUserConfig struct {
 	authConfig
 	ByID   bool `psy:"by-id"`
 	ByNick bool `psy:"by-nick"`
 }
 
+// lookupUser builds the ifunny-lookup-user transformer. It hydrates a
+// light User reference — a record with "id" and/or "nick" fields, as
+// emitted by ifunny-author — into the full User object. A not-found user
+// drops the datum rather than failing the pipeline.
+//
+// Set exactly one of by-id / by-nick to pick which field of the input
+// records the lookup keys on.
+//
+// Example (chain after ifunny-author to hydrate commenter identities):
+//
+//	transform "ifunny-lookup-user" "hydrate" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  by-id = true
+//	}
+//
+// Example (lookup by nick when the upstream carries handles, not ids):
+//
+//	transform "ifunny-lookup-user" "by-handle" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  by-nick = true
+//	}
 func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 	config := new(lookupUserConfig)
 	if err := parse(config); err != nil {
@@ -187,6 +250,22 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 	}, nil
 }
 
+// lookupChannel builds the ifunny-lookup-channel transformer. It hydrates
+// a light ChatChannel reference — a record whose "name" field carries the
+// channel name — into the full ChatChannel object.
+//
+// Channels are keyed by name (not a numeric id), so this transformer
+// bypasses the shared lookup helper and reads the "name" field directly.
+//
+// Example:
+//
+//	transform "ifunny-lookup-channel" "hydrate" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	}
 func lookupChannel(parse sdk.Parser) (sdk.Transformer, error) {
 	client, _, err := newClient(parse)
 	if err != nil {

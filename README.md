@@ -26,42 +26,51 @@ constraint of Go plugins.
 
 ## Authentication
 
-Every API-backed resource takes exactly one of three auth modes:
+Every API-backed resource takes a `user-agent` block plus exactly one of two
+mutually-exclusive auth modes:
 
 | Option | Type | Access |
 | --- | --- | --- |
-| `bearer-token` | string | A logged-in user's OAuth token — full access. **Required by the chat resources** (`ifunny-chat-*`), whose WAMP connection authenticates with a bearer ticket. |
-| `basic-token` | string | An already-generated-and-primed anonymous basic token — read-only access to the public REST endpoints. |
-| `generate-basic` | block | Mint and prime a fresh basic token at startup instead of supplying one. Priming is a one-time ~15s handshake against the API. |
+| `auth-bearer` | string | A logged-in user's OAuth token — full access. **Required by the chat resources** (`ifunny-chat-*`), whose WAMP connection authenticates with a bearer ticket. |
+| `auth-basic` | string | Anonymous read-only REST access. Value is one of: a literal already-primed basic token, `"generate"` (mint + prime one at bind time), or `"generate-cache"` (mint + prime once, then reuse across runs). |
+| `user-agent` | block | Device profile that renders the request user-agent. Required for every auth mode. |
 
-`bearer-token` and `basic-token` also need a top-level `user-agent` string.
-`generate-basic` renders the user-agent from its own fields, so the top-level
-`user-agent` is unused in that mode.
+Tokens are typically wired from the environment, e.g. `auth-bearer =
+env.IFUNNY_BEARER`. Setting both `auth-basic` and `auth-bearer` (or neither)
+errors at bind time — the mutex is enforced, no implicit priority.
 
-Tokens are typically wired from the environment, e.g. `bearer-token =
-env.IFUNNY_BEARER`. If more than one is set, the priority is
-`bearer-token` → `basic-token` → `generate-basic`.
-
-The `generate-basic` block:
+### The `user-agent` block
 
 ```hcl
-generate-basic {
-  platform-name    = "Android"   # required, one of: Android, iOS
-  platform-version = "14"        # required, e.g. "14" (Android) or "17.5.1" (iOS)
-  app-version      = ""          # optional, defaults to ifunny-go's pinned APP_VERSION
-  app-build        = ""          # optional, defaults to ifunny-go's pinned APP_BUILD
+user-agent {
+  device         = "android"   # required, one of: android, ios
+  device-version = "14"        # required, e.g. "14" (android) or "17.5.1" (ios)
+  app-version    = ""          # optional, defaults to ifunny-go's pinned APP_VERSION
+  app-build      = ""          # optional, defaults to ifunny-go's pinned APP_BUILD
 }
 ```
 
-The block's fields render a mobile user-agent identical in shape to the ones
+The block renders a mobile user-agent identical in shape to the ones
 `ifunny-go`'s `Android{}` / `IOS{}` types produce. Brand and model are fixed
 (`google` / `Pixel 8`, `Apple` / `iPhone 15 Pro`) — only the OS and app
 version tokens are caller-controllable.
+
+### `auth-basic` values
 
 A **basic token** is iFunny's anonymous credential: a base64 value derived
 from a random UUID and the app client id/secret, then "primed" by one
 authenticated call before it grants read access. It covers the REST discovery
 producers and lookups but **not** the chat resources.
+
+- **Literal token** (e.g. `auth-basic = env.IFUNNY_BASIC`): treated as
+  already primed; no handshake at bind time.
+- **`"generate"`**: mint and prime a fresh token every startup. Costs a
+  one-time ~15s handshake against the API per run.
+- **`"generate-cache"`**: mint and prime once, then persist the primed
+  token to `$XDG_CACHE_HOME/psyduck-ifunny/basic-token` (falling back to
+  `~/.cache/psyduck-ifunny/basic-token`) so subsequent runs load the file
+  and skip the handshake. To invalidate — e.g. if the token starts failing
+  — delete the cache file and the next run will re-mint.
 
 ## Rate limiting and cutoffs
 
@@ -157,7 +166,7 @@ addition to the shared auth options (see [Authentication](#authentication)).
 | `ifunny-channels` | `query` | ChatChannel | — (seed) |
 | `ifunny-chat-history` | `channel` | ChatEvent | `ChatChannel.name` |
 | `ifunny-chat-listen` | `channel`, `stop-after` | ChatEvent | `ChatChannel.name` |
-| `ifunny-chat-invites` | `stop-after` | ChatChannel | — (seed; bearer-token only) |
+| `ifunny-chat-invites` | `stop-after` | ChatChannel | — (seed; `auth-bearer` only) |
 
 Notes:
 
@@ -177,7 +186,7 @@ Notes:
   chat websocket. **`ifunny-chat-listen`** streams live events; set its
   `stop-after` to bound collection (0 listens until the process exits).
 - **`ifunny-chat-invites`** streams `ChatChannel`s the logged-in user is
-  invited to. Requires `bearer-token` (anonymous clients receive no
+  invited to. Requires `auth-bearer` (anonymous clients receive no
   invites); shares `ifunny-chat-listen`'s locally-declared `stop-after`
   semantics for the same reason (no natural end to a live subscription).
 
@@ -218,16 +227,8 @@ this work:
 > yields, so one run advances one hop. Re-run to continue, or raise the seed
 > producer's `stop-after` once the host drains multiple blocks.
 
-See [`examples/`](./examples) for runnable pipelines:
-
-- [`explore-to-comments`](./examples/explore-to-comments/main.psy) — explore
-  → content → comments.
-- [`content-to-users`](./examples/content-to-users/main.psy) — feed → users
-  who smiled → their timelines.
-- [`chat-discovery`](./examples/chat-discovery/main.psy) — trending channels
-  → message history → authors.
-- [`tags`](./examples/tags/main.psy) — feed → `ifunny-tags` → inspect, with the
-  `mysql` wiring sketched in comments.
+Each resource's godoc comment carries a runnable HCL `Example:` block — see
+the package doc at [`doc.go`](./doc.go) for the full inventory.
 
 ## Tag aggregation
 

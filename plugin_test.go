@@ -15,24 +15,24 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":           {sdk.PRODUCER, []string{"bearer-token", "user-agent", "feed"}},
-	"ifunny-timeline":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "by-id", "by-nick"}},
-	"ifunny-explore":        {sdk.PRODUCER, []string{"bearer-token", "user-agent", "compilation", "kind"}},
-	"ifunny-comments":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content"}},
-	"ifunny-replies":        {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content", "comment"}},
-	"ifunny-smiles":         {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content"}},
-	"ifunny-republishers":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "content"}},
-	"ifunny-subscribers":    {sdk.PRODUCER, []string{"bearer-token", "user-agent", "user"}},
-	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"bearer-token", "user-agent", "user"}},
-	"ifunny-channels":       {sdk.PRODUCER, []string{"bearer-token", "user-agent", "query"}},
-	"ifunny-chat-history":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel"}},
-	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"bearer-token", "user-agent", "channel", "stop-after"}},
-	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"bearer-token", "user-agent", "stop-after"}},
+	"ifunny-feed":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed"}},
+	"ifunny-timeline":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
+	"ifunny-explore":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind"}},
+	"ifunny-comments":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
+	"ifunny-replies":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment"}},
+	"ifunny-smiles":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
+	"ifunny-republishers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
+	"ifunny-subscribers":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
+	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
+	"ifunny-channels":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query"}},
+	"ifunny-chat-history":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel"}},
+	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after"}},
+	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after"}},
 	"ifunny-author":         {sdk.TRANSFORMER, nil},
 	"ifunny-tags":           {sdk.TRANSFORMER, nil},
-	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
-	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"bearer-token", "user-agent", "by-id", "by-nick"}},
-	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"bearer-token", "user-agent"}},
+	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
+	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
+	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -82,7 +82,7 @@ func TestClientSpecsAuthModes(t *testing.T) {
 	for _, s := range clientSpecs() {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"bearer-token", "basic-token", "generate-basic", "user-agent"} {
+	for _, want := range []string{"auth-basic", "auth-bearer", "user-agent"} {
 		if !names[want] {
 			t.Errorf("clientSpecs missing auth spec %q", want)
 		}
