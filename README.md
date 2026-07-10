@@ -204,32 +204,43 @@ Every transformer takes the shared auth surface (see
 
 | Resource | Options (beyond accept/emit) | S → T |
 | --- | --- | --- |
-| `ifunny-author` | — | Content / Comment / ChatEvent → User |
+| `ifunny-author` | `emit-by = "id"` (default) or `"nick"` | Content / Comment / ChatEvent → User |
 | `ifunny-tags` | — | Content → `{"tags": [...]}` (json emit only) |
 | `ifunny-content` | — | Content ref → Content |
-| `ifunny-user` | `by-id`, `by-nick` (mutex) | User ref → User |
+| `ifunny-user` | `by = "id"` (default) or `"nick"` | User ref → User |
 | `ifunny-channel` | — | Channel ref → ChatChannel |
+
+`ifunny-author`'s `emit-by` and `ifunny-user`'s `by` name the user
+reference axis the transformer uses end-to-end: which field of the
+input map (`creator.id` vs `creator.nick`, or `id` vs `nick`) is read
+as the target ref, which endpoint hydrates the target
+(`compose.UserByID` vs `compose.UserByNick`), and — under sparse emit —
+what is written out. `"id"` and `"nick"` are the only valid values;
+anything else errors at bind time.
 
 Op count per accept×emit cell (S = source entity, T = target entity):
 
 | accept → emit | sparse (`string`) | rich (`json`) |
 | --- | --- | --- |
-| **sparse** (`string`) | S≠T: 1 fetch (source, extract target ref). S=T: **bind error** — no-op (except `ifunny-user` by-nick, which is a real nick→id fetch). | S≠T: 1 fetch (source) + 1 fetch (target). S=T: 1 fetch (target). |
+| **sparse** (`string`) | S≠T: 1 fetch (source, extract target ref). S=T: **bind error** — no-op. | S≠T: 1 fetch (source) + 1 fetch (target). S=T: 1 fetch (target). |
 | **rich** (`json`) | 0 fetches on the fast path (target ref present); 1 fetch on fallback (needed field missing → fetch source by its own id, retry extraction). | 1 fetch (always — target is hydrated fresh) + 0 or 1 fallback fetch on missed extraction. |
 
 Bind-time errors:
 
 - `ifunny-tags` with `emit = "string"` — a tag list has no terminal ref.
-- `ifunny-content`, `ifunny-channel`, and `ifunny-user` (`by-id`) with
-  `accept = emit = "string"` — identity, zero ops. `ifunny-user` `by-nick`
-  sparse → sparse is fine (nick → id is a real fetch).
+- `ifunny-content`, `ifunny-channel`, and `ifunny-user` (either `by`
+  mode) with `accept = emit = "string"` — identity, zero ops. The
+  reference axis (id or nick) stays consistent throughout the pipeline,
+  so a sparse→sparse pass is always a no-op.
 
 Runtime behavior notes:
 
 - **`ifunny-author`** extracts the author reference from any entity that has
-  one — content (`creator`), comments and chat events (`user`). Sparse emit
-  drops the nick (bare user id); rich emit fetches the full User. Entities
-  with no author are dropped from the pipeline.
+  one — content (`creator`), comments and chat events (`user`). `emit-by`
+  (default `"id"`) picks the reference axis: `"id"` reads/emits the numeric
+  user id, `"nick"` reads/emits the nickname. Sparse emit produces the
+  bare id (or nick); rich emit fetches the full User keyed on the same
+  axis. Entities with no author are dropped from the pipeline.
 - **`ifunny-tags`** lifts a post's tag list as `{"tags": [...]}`. Posts with
   no tags are dropped. Missing `tags` key on a rich input triggers a
   content-by-id fallback fetch. See

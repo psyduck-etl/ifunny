@@ -231,7 +231,17 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-author",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: authorTransformer,
-			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "emit-by",
+					Description: `which author reference to emit and fetch by, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
+					Type:        sdk.TypeString,
+					Default:     "id",
+				},
+				acceptSpec(),
+				emitSpec(),
+				bufferSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
@@ -251,16 +261,10 @@ func Plugin() sdk.Plugin {
 			ProvideTransformer: userTransformer,
 			Spec: specs(
 				&sdk.Spec{
-					Name:        "by-id",
-					Description: "look up by the input's id field; mutually exclusive with by-nick",
-					Type:        sdk.TypeBool,
-					Default:     false,
-				},
-				&sdk.Spec{
-					Name:        "by-nick",
-					Description: "look up by the input's nick field; mutually exclusive with by-id",
-					Type:        sdk.TypeBool,
-					Default:     false,
+					Name:        "by",
+					Description: `which user reference to key on, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
+					Type:        sdk.TypeString,
+					Default:     "id",
 				},
 				acceptSpec(),
 				emitSpec(),

@@ -53,6 +53,21 @@ func extractAuthor(m map[string]any) (authorRef, bool) {
 	return authorRef{}, false
 }
 
+// parseUserBy validates a "by" or "emit-by" string against the two
+// user reference axes. Returns true iff the caller should key on nick.
+// The resource name is included in the error so ifunny-user vs
+// ifunny-author callers get a self-locating message.
+func parseUserBy(v, resource string) (byNick bool, err error) {
+	switch v {
+	case "id":
+		return false, nil
+	case "nick":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s: unrecognized user reference axis %q; want \"id\" or \"nick\"", resource, v)
+	}
+}
+
 // enrichSpec is the per-transformer data table runEnrich walks. Each
 // resource (author / tags / content / user / channel) supplies its own,
 // and runEnrich holds the shared channel-loop + matrix dispatch.
@@ -225,16 +240,20 @@ func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs ch
 }
 
 // authorTransformer builds the ifunny-author transformer. It maps a
-// Content, Comment, or ChatEvent to its author's User.
+// Content, Comment, or ChatEvent to its author's User. The emit-by
+// field ("id" default, or "nick") names the user reference axis
+// throughout — it decides which creator/user field on the source is
+// the target ref, which endpoint fetchTarget calls, and what
+// sparse-out emits.
 //
 // Matrix per record:
 //
-//   - accept=string, emit=string: fetch content by id → user id.        1 op
+//   - accept=string, emit=string: fetch content by id → creator ref.    1 op
 //   - accept=string, emit=json:   fetch content → fetch user.           2 ops
-//   - accept=json,   emit=string: read creator.id from map (fallback
-//     via content id if missing).                              0 or 1 op
-//   - accept=json,   emit=json:   read creator.id from map → fetch user
-//     (fallback via content id if missing).                    1 or 2 ops
+//   - accept=json,   emit=string: read creator.<emit-by> from map
+//     (fallback via content id if missing).                    0 or 1 op
+//   - accept=json,   emit=json:   read creator.<emit-by> from map → fetch
+//     user (fallback via content id if missing).               1 or 2 ops
 //
 // A record whose author cannot be resolved (e.g. system-authored)
 // drops from the pipeline.
@@ -250,17 +269,24 @@ func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs ch
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
-//	  accept = "json"
-//	  emit   = "string"
+//	  emit-by = "id"    # or "nick"
+//	  accept  = "json"
+//	  emit    = "string"
 //	}
 func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
+		EmitBy string `psy:"emit-by"`
 		Accept string `psy:"accept"`
 		Emit   string `psy:"emit"`
 		Buffer int    `psy:"buffer"`
-	}{Accept: "json", Emit: "json"}
+	}{EmitBy: "id", Accept: "json", Emit: "json"}
 	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	byNick, err := parseUserBy(config.EmitBy, "ifunny-author")
+	if err != nil {
 		return nil, err
 	}
 
@@ -281,15 +307,37 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
 
+	// pickCreatorField extracts creator.id or creator.nick per emit-by
+	// from the fetched Content. Empty string means the Content lacks
+	// the chosen axis (e.g. a nick that wasn't in the response).
+	pickCreatorField := func(c *ifunny.Content) string {
+		if byNick {
+			return c.Creator.Nick
+		}
+		return c.Creator.ID
+	}
+	// pickAuthorRef extracts the map's creator/user field per emit-by.
+	pickAuthorRef := func(a authorRef) string {
+		if byNick {
+			return a.Nick
+		}
+		return a.ID
+	}
+
 	spec := enrichSpec{
-		name:      "ifunny-author",
+		name: "ifunny-author",
 		targetRef: func(m map[string]any) (string, bool) {
 			author, ok := extractAuthor(m)
-			return author.ID, ok
+			if !ok {
+				return "", false
+			}
+			ref := pickAuthorRef(author)
+			return ref, ref != ""
 		},
 		// sparse-in / rich-in-miss: fetch the source content and
-		// pluck creator.id off it. The Content struct populates
-		// Creator.ID on every hydrated response.
+		// pluck creator.<emit-by> off it. The Content struct
+		// populates Creator.ID on every hydrated response;
+		// Creator.Nick is populated on non-anonymous authors.
 		resolveRef: func(contentID string) (string, error) {
 			content, err := client.GetContent(contentID)
 			if err != nil {
@@ -298,10 +346,14 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			if content == nil {
 				return "", nil
 			}
-			return content.Creator.ID, nil
+			return pickCreatorField(content), nil
 		},
-		fetchTarget: func(userID string) (any, error) {
-			user, err := client.GetUser(compose.UserByID(userID))
+		fetchTarget: func(ref string) (any, error) {
+			req := compose.UserByID(ref)
+			if byNick {
+				req = compose.UserByNick(ref)
+			}
+			user, err := client.GetUser(req)
 			if err != nil {
 				if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 					return nil, nil
@@ -311,15 +363,6 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			return user, nil
 		},
 	}
-
-	// Sparse out for author emits the bare user id — but per the
-	// design (id-only, drops nick) the emit path in runEnrich passes
-	// the ref through emit.Encode(ref). For discrete emit we could
-	// still surface {id, nick} by materialising an authorRef; we don't,
-	// to keep the matrix strictly two-dimensional (sparse=terminal ref,
-	// rich=fetched target). Callers wanting {id, nick} chain
-	// ifunny-user after this.
-	_ = authorRef{}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
@@ -584,35 +627,35 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}, nil
 }
 
-// userConfigT configures ifunny-user. Exactly one of ByID / ByNick
-// must be true — id lookups and nick lookups hit different endpoints
-// and can behave differently on edge cases like renames. Named
-// userConfigT to avoid colliding with the produce.go userConfig.
+// userConfigT configures ifunny-user. By names which user reference the
+// transformer keys on — "id" (default, numeric id lookup) or "nick"
+// (nickname lookup). The two hit different endpoints and can behave
+// differently on edge cases like renames. Named userConfigT to avoid
+// colliding with the produce.go userConfig.
 type userConfigT struct {
 	authConfig
-	ByID   bool   `psy:"by-id"`
-	ByNick bool   `psy:"by-nick"`
+	By     string `psy:"by"`
 	Accept string `psy:"accept"`
 	Emit   string `psy:"emit"`
 	Buffer int    `psy:"buffer"`
 }
 
 // userTransformer builds the ifunny-user transformer. It hydrates a
-// User reference into a User entity, keyed by id (by-id) or nick
-// (by-nick).
+// User reference into a User entity, keyed by id (`by = "id"`) or nick
+// (`by = "nick"`).
 //
-// Matrix per record (by-id mode; by-nick mode fetches to resolve the
-// id even on the sparse→sparse cell — a nick and its id are not the
-// same reference, so it's genuinely 1 op):
+// Matrix per record (`by = "id"` mode; `by = "nick"` mode fetches to
+// resolve the id even on the sparse→sparse cell — a nick and its id
+// are not the same reference, so it's genuinely 1 op):
 //
-//   - by-id  accept=string, emit=string: identity no-op → bind error.
-//   - by-id  accept=string, emit=json:   fetch user by id.               1 op
-//   - by-id  accept=json,   emit=string: read map["id"], emit.           0 ops
-//   - by-id  accept=json,   emit=json:   read map["id"] → fetch user.    1 op
-//   - by-nick accept=string, emit=string: fetch to resolve nick → id.    1 op
-//   - by-nick accept=string, emit=json:   fetch by nick.                 1 op
-//   - by-nick accept=json,   emit=string: fetch by rich.nick → id.       1 op
-//   - by-nick accept=json,   emit=json:   fetch by rich.nick → user.     1 op
+//   - by=id   accept=string, emit=string: identity no-op → bind error.
+//   - by=id   accept=string, emit=json:   fetch user by id.               1 op
+//   - by=id   accept=json,   emit=string: read map["id"], emit.           0 ops
+//   - by=id   accept=json,   emit=json:   read map["id"] → fetch user.    1 op
+//   - by=nick accept=string, emit=string: fetch to resolve nick → nick.   1 op
+//   - by=nick accept=string, emit=json:   fetch by nick.                  1 op
+//   - by=nick accept=json,   emit=string: fetch by rich.nick → nick.      1 op
+//   - by=nick accept=json,   emit=json:   fetch by rich.nick → user.      1 op
 //
 // A not-found user drops. Requires auth.
 //
@@ -624,23 +667,25 @@ type userConfigT struct {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
-//	  by-id  = true
+//	  by     = "id"
 //	  accept = "string"
 //	  emit   = "json"
 //	}
 func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
-	config := &userConfigT{Accept: "json", Emit: "json"}
+	config := &userConfigT{By: "id", Accept: "json", Emit: "json"}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if config.ByID == config.ByNick {
-		return nil, fmt.Errorf("ifunny-user: exactly one of by-id or by-nick is required")
+	byNick, err := parseUserBy(config.By, "ifunny-user")
+	if err != nil {
+		return nil, err
 	}
-	// by-id sparse→sparse is identity; by-nick sparse→sparse is
-	// genuinely a fetch (nick → id) so we don't bind-error it.
-	if config.ByID && stringy(config.Accept) && stringy(config.Emit) {
-		return nil, fmt.Errorf("ifunny-user: by-id with accept=string emit=string is a no-op (id → same id)")
+	// Sparse→sparse is identity in both modes: the reference axis
+	// stays consistent throughout the pipeline (id in, id out, or
+	// nick in, nick out — no cross-axis conversion).
+	if stringy(config.Accept) && stringy(config.Emit) {
+		return nil, fmt.Errorf("ifunny-user: accept=string emit=string is a no-op (%s → same %s)", config.By, config.By)
 	}
 
 	accept, err := codecFor(config.Accept)
@@ -659,10 +704,13 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
-	byNick := config.ByNick
+	key := "id"
+	if byNick {
+		key = "nick"
+	}
 
-	// getUserByRef hits the right endpoint per by-id/by-nick and
-	// swallows not_found into (nil, nil) so runEnrich drops.
+	// getUser hits the id or nick endpoint per by, swallowing not_found
+	// into (nil, nil) so runEnrich drops.
 	getUser := func(ref string) (*ifunny.User, error) {
 		req := compose.UserByID(ref)
 		if byNick {
@@ -681,47 +729,14 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	spec := enrichSpec{
 		name: "ifunny-user",
 		targetRef: func(m map[string]any) (string, bool) {
-			key := "id"
-			if byNick {
-				key = "nick"
-			}
 			s, ok := m[key].(string)
 			return s, ok && s != ""
 		},
-		resolveRef: func(ref string) (string, error) {
-			if !byNick {
-				// by-id: identity — the input ref is the
-				// target ref.
-				return ref, nil
-			}
-			// by-nick: nick → id genuinely takes a fetch.
-			user, err := getUser(ref)
-			if err != nil {
-				return "", err
-			}
-			if user == nil {
-				return "", nil
-			}
-			return user.ID, nil
-		},
+		// Identity — the input ref is already keyed on the chosen
+		// axis, so nothing to resolve.
+		resolveRef: func(ref string) (string, error) { return ref, nil },
 		fetchTarget: func(ref string) (any, error) {
-			// After resolveRef the ref is a user id (by-id
-			// mode) or a nick still (by-nick mode via the
-			// rich-in path where targetRef returned nick).
-			// In by-nick mode we want to fetch by nick so
-			// callers get consistent semantics.
-			if byNick {
-				return getUser(ref)
-			}
-			// by-id: ref is an id.
-			user, err := client.GetUser(compose.UserByID(ref))
-			if err != nil {
-				if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
-					return nil, nil
-				}
-				return nil, err
-			}
-			return user, nil
+			return getUser(ref)
 		},
 	}
 

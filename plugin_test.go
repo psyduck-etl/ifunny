@@ -76,10 +76,10 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
 	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
 	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
-	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "emit-by", "accept", "emit", "buffer"}},
 	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
 	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
-	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "accept", "emit", "buffer"}},
+	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit", "buffer"}},
 	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
 }
 
