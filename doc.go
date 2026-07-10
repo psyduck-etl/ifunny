@@ -44,9 +44,10 @@
 // user's OAuth token; required for the chat resources). See [authConfig]
 // and [userAgentConfig] for the full surface.
 //
-// # Transformer accept / emit matrix
+// # Codec fields
 //
-// Every transformer takes two encoding fields (default "json"):
+// Producers take an emit field (default "json") naming the codec their
+// records are encoded with. Transformers take both halves:
 //
 //   - accept — encoding of records the transformer decodes on input.
 //     "json" is a rich object trusted only insofar as we find it useful:
@@ -61,10 +62,14 @@
 //
 // The accept×emit matrix is solved at bind time. Bind-time errors:
 // ifunny-tags with emit = "string" (no terminal ref for a tag list), and
-// same-entity identity resources with accept = emit = "string"
-// (ifunny-content, ifunny-channel, ifunny-user by-id — nothing to do).
-// ifunny-user by-nick sparse→sparse is *not* an error because nick → id
-// is a real fetch.
+// the identity resources with accept = emit = "string" (ifunny-content,
+// ifunny-channel, ifunny-user — the reference axis is consistent
+// end-to-end, so sparse→sparse has nothing to do in either by mode).
+//
+// ifunny-user's by and ifunny-author's emit-by (both "id" by default,
+// or "nick") pick the user reference axis applied throughout: which
+// field is read from rich input, which endpoint fetches, and what a
+// sparse emit carries.
 //
 // # ELI5 example
 //

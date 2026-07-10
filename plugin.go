@@ -24,7 +24,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -44,7 +44,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Default:     "",
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -64,7 +64,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 
@@ -80,7 +80,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -100,7 +100,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 
@@ -116,7 +116,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -130,7 +130,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -144,7 +144,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -158,7 +158,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 
@@ -174,7 +174,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Default:     "",
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -188,7 +188,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -208,7 +208,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeInt,
 					Default:     0,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -222,7 +222,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeInt,
 					Default:     0,
 				},
-				encodingSpec(),
+				emitSpec(),
 			),
 		},
 

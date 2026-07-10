@@ -150,8 +150,9 @@ per-resource "Chain in from" column below.
 
 ## Producers
 
-All producers emit JSON entities from the iFunny API. Options listed are in
-addition to the shared auth options (see [Authentication](#authentication)).
+All producers emit entities from the iFunny API, encoded via their `emit`
+field (default `"json"`). Options listed are in addition to the shared auth
+options (see [Authentication](#authentication)) and `emit`.
 
 | Resource | Options | Emits | Chain in from |
 | --- | --- | --- | --- |
@@ -194,7 +195,7 @@ Notes:
 ## Transformers
 
 Every transformer takes the shared auth surface (see
-[Authentication](#authentication)) plus two encoding fields:
+[Authentication](#authentication)) plus two codec fields:
 
 | Field | Default | Meaning |
 | --- | --- | --- |

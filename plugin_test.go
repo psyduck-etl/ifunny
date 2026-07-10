@@ -55,6 +55,25 @@ func (stringCodec) Encode(v any) ([]byte, error) {
 	return []byte(s), nil
 }
 
+// testAccept / testEmit build bound codec-config halves for driving
+// runEnrich directly. They panic on an unknown spec — a test-authoring
+// bug, not a runtime condition.
+func testAccept(spec string) *acceptConfig {
+	c := &acceptConfig{Accept: spec}
+	if err := c.bind(); err != nil {
+		panic(err)
+	}
+	return c
+}
+
+func testEmit(spec string) *emitConfig {
+	c := &emitConfig{Emit: spec}
+	if err := c.bind(); err != nil {
+		panic(err)
+	}
+	return c
+}
+
 // expectedResource describes what the assembly must advertise for a
 // resource: its kind and the specs it must expose.
 type expectedResource struct {
@@ -63,19 +82,19 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "encoding"}},
-	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
-	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "encoding"}},
-	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-replies":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "encoding"}},
-	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
-	"ifunny-subscriptions": {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
-	"ifunny-channels":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "encoding"}},
-	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
-	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
-	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
+	"ifunny-feed":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "emit"}},
+	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
+	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
+	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-replies":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "emit"}},
+	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-subscriptions": {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-channels":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "emit"}},
+	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
+	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "emit"}},
+	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "emit"}},
 	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "emit-by", "accept", "emit", "buffer"}},
 	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
 	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
@@ -266,7 +285,7 @@ func TestRunEnrichSparseIn_SparseOut(t *testing.T) {
 	in <- []byte("xyz")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, stringCodec{}, true, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("string"), 0, spec)
 
 	var got [][]byte
 	for b := range out {
@@ -295,7 +314,7 @@ func TestRunEnrichSparseIn_RichOut(t *testing.T) {
 	in <- []byte("xyz")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("json"), 0, spec)
 
 	got := new(testEntity)
 	b := <-out
@@ -326,7 +345,7 @@ func TestRunEnrichRichIn_SparseOut(t *testing.T) {
 	in <- []byte(`{"id":"abc","name":"hydrated"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("string"), 0, spec)
 
 	b := <-out
 	if string(b) != "abc" {
@@ -351,7 +370,7 @@ func TestRunEnrichRichIn_RichOut(t *testing.T) {
 	in <- []byte(`{"id":"abc","name":"stale-cache"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), 0, spec)
 
 	got := new(testEntity)
 	if err := json.Unmarshal(<-out, got); err != nil {
@@ -381,7 +400,7 @@ func TestRunEnrichRichMissingTargetFallsBack(t *testing.T) {
 	in <- []byte(`{"id":"src-id","name":"no-target"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("string"), 0, spec)
 
 	b := <-out
 	if string(b) != "src-id" {
@@ -406,7 +425,7 @@ func TestRunEnrichNotFoundDrops(t *testing.T) {
 	in <- []byte("missing")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("json"), 0, spec)
 
 	if _, ok := <-out; ok {
 		t.Errorf("expected no output on not-found")
@@ -426,7 +445,7 @@ func TestRunEnrichUnusableRichErrors(t *testing.T) {
 	in <- []byte(`{"other":"foo"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, 0, spec)
+	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), 0, spec)
 
 	select {
 	case err := <-errs:
@@ -483,7 +502,7 @@ func TestRunEnrichPipelinesConcurrently(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, buffer, spec)
+		runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), buffer, spec)
 		close(done)
 	}()
 

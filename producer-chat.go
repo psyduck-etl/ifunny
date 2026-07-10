@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"sync"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
 	"github.com/open-ifunny/ifunny-go/compose"
@@ -13,8 +12,8 @@ import (
 // channel name.
 type chatConfig struct {
 	authConfig
-	Channel  string `psy:"channel"`
-	Encoding string `psy:"encoding"`
+	Channel string `psy:"channel"`
+	emitConfig
 }
 
 // produceChatHistory builds the ifunny-chat-history producer. It backfills
@@ -35,16 +34,15 @@ type chatConfig struct {
 //	    device-version = "14"
 //	  }
 //	  channel = "chat.some-channel-name"
-//	  encoding = "json"
+//	  emit     = "json"
 //	}
 func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
-	config := &chatConfig{Encoding: "json"}
+	config := &chatConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	codec, err := codecFor(config.Encoding)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -60,7 +58,7 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		iter := chat.IterMessages(compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
-		produceIter(ctx, iter, send, errs, codec)
+		produceIter(ctx, iter, send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -72,7 +70,7 @@ type chatListenConfig struct {
 	authConfig
 	Channel   string `psy:"channel"`
 	StopAfter int    `psy:"stop-after"`
-	Encoding  string `psy:"encoding"`
+	emitConfig
 }
 
 // produceChatListen builds the ifunny-chat-listen producer. It streams
@@ -86,9 +84,9 @@ type chatListenConfig struct {
 // callback. We bridge those onto an internal channel and encode them on
 // the producer goroutine. A done channel lets the callback abandon a send
 // the moment we stop, so a late event can never block on a listener that
-// has already gone away, and sync.Once makes teardown safe to call twice.
+// has already gone away. Teardown runs once, in the producer's defer.
 //
-// Requires auth-bearer. Takes an encoding spec (default "json").
+// Requires auth-bearer. Takes an emit spec (default "json").
 //
 // Example:
 //
@@ -99,17 +97,16 @@ type chatListenConfig struct {
 //	    device-version = "14"
 //	  }
 //	  channel    = "chat.some-channel-name"
-//	  encoding   = "json"
+//	  emit       = "json"
 //	  stop-after = 100
 //	}
 func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
-	config := &chatListenConfig{Encoding: "json"}
+	config := &chatListenConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	codec, err := codecFor(config.Encoding)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -141,20 +138,16 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			return
 		}
 
-		var once sync.Once
-		stop := func() {
-			once.Do(func() {
-				close(done)
-				unsubscribe()
-			})
-		}
-		defer stop()
+		defer func() {
+			close(done)
+			unsubscribe()
+		}()
 
 		count := 0
 		for {
 			select {
 			case event := <-events:
-				b, err := codec.Encode(event)
+				b, err := config.Encode(event)
 				if err != nil {
 					sendErr(ctx, errs, err)
 					return
@@ -183,8 +176,8 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 // scoped to the authenticated user, not to a specific channel.
 type invitesConfig struct {
 	authConfig
-	StopAfter int    `psy:"stop-after"`
-	Encoding  string `psy:"encoding"`
+	StopAfter int `psy:"stop-after"`
+	emitConfig
 }
 
 // produceChatInvites builds the ifunny-chat-invites producer. It streams
@@ -210,17 +203,16 @@ type invitesConfig struct {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
-//	  encoding = "json"
+//	  emit     = "json"
 //	  stop-after = 10
 //	}
 func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
-	config := &invitesConfig{Encoding: "json"}
+	config := &invitesConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	codec, err := codecFor(config.Encoding)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -252,20 +244,16 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			return
 		}
 
-		var once sync.Once
-		stop := func() {
-			once.Do(func() {
-				close(done)
-				unsubscribe()
-			})
-		}
-		defer stop()
+		defer func() {
+			close(done)
+			unsubscribe()
+		}()
 
 		count := 0
 		for {
 			select {
 			case channel := <-invites:
-				b, err := codec.Encode(channel)
+				b, err := config.Encode(channel)
 				if err != nil {
 					sendErr(ctx, errs, err)
 					return
@@ -286,5 +274,90 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 				return
 			}
 		}
+	}, nil
+}
+
+// channelsConfig configures ifunny-channels. An empty Query is the
+// trending-channels feed (a single non-paged fetch); a non-empty Query
+// hits the paginated open-channels search.
+type channelsConfig struct {
+	authConfig
+	Query string `psy:"query"`
+	emitConfig
+}
+
+// produceChannels builds the ifunny-channels producer. It emits ChatChannel
+// entities encoded via codec (default "json") — either the trending set
+// (when Query is empty) or the search results for Query. Both modes hit
+// REST endpoints, so anonymous (auth-basic) clients work; only downstream
+// chat resources need auth-bearer.
+//
+// Example (trending channels):
+//
+//	produce "ifunny-channels" "trending" {
+//	  auth-basic = env.IFUNNY_BASIC
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  emit     = "json"
+//	  stop-after = 10
+//	}
+//
+// Example (search open channels):
+//
+//	produce "ifunny-channels" "gaming" {
+//	  auth-basic = env.IFUNNY_BASIC
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  query = "gaming"
+//	  emit     = "json"
+//	}
+func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
+	config := &channelsConfig{emitConfig: emitConfig{Emit: "json"}}
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	if err := config.emitConfig.bind(); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// An empty query means "trending", which is a single non-paged fetch;
+	// a query hits the paginated open-channels search.
+	if config.Query == "" {
+		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
+			defer close(send)
+
+			channels, err := client.GetChannels(compose.ChatsTrending)
+			if err != nil {
+				sendErr(ctx, errs, err)
+				return
+			}
+
+			for _, channel := range channels {
+				b, err := config.Encode(channel)
+				if err != nil {
+					sendErr(ctx, errs, err)
+					return
+				}
+				select {
+				case send <- b:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}, nil
+	}
+
+	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
+		produceIter(ctx, client.IterChannelsQuery(config.Query), send, errs, &config.emitConfig)
 	}, nil
 }

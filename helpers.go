@@ -2,18 +2,17 @@ package main
 
 import (
 	"context"
-	"strings"
 
 	"github.com/psyduck-etl/sdk"
 )
 
-// codecFor resolves an encoding spec via the sdk-registered codec factory.
+// codecFor resolves a codec spec via the sdk-registered codec factory.
 // The host binary (psyduck) installs a factory at startup; standalone
-// tests register a stub in TestMain. Spec strings are normalized to
-// lowercase so config values like "JSON" keep working against the stdlib's
-// lowercase codec names.
+// tests register a stub in TestMain. Spec strings are matched exactly —
+// codec names are lowercase, and a config value like "JSON" is rejected
+// at bind time rather than silently normalized.
 func codecFor(spec string) (sdk.Codec, error) {
-	return sdk.GetCodec(strings.ToLower(spec))
+	return sdk.GetCodec(spec)
 }
 
 // stringy reports whether spec names the "string" codec — the one that
@@ -21,12 +20,59 @@ func codecFor(spec string) (sdk.Codec, error) {
 // channel name) rather than a discrete structured object. Only the literal
 // "string" spec qualifies; discrete codecs (json, yaml, ...) do not.
 //
-// The lookup transformers and producers branch on stringy to decide
-// whether to emit the full object or just its terminal reference, and
-// (for the lookup transformers) whether to interpret input as a bare id
-// or as a decoded map from which rich fields can short-circuit the API.
+// The enrich transformers branch on stringy to decide whether to emit the
+// full object or just its terminal reference, and whether to interpret
+// input as a bare id or as a decoded map from which rich fields can
+// short-circuit the API.
 func stringy(spec string) bool {
-	return strings.ToLower(spec) == "string"
+	return spec == "string"
+}
+
+// acceptConfig is the embeddable input-codec half of a resource config.
+// Transformers (and any future consumers) embed it to gain the `accept`
+// field plus a bound Decode. Call bind once after parse; it resolves the
+// codec and fails fast on an unknown spec.
+type acceptConfig struct {
+	Accept string `psy:"accept"`
+	codec  sdk.Codec
+}
+
+func (c *acceptConfig) bind() (err error) {
+	c.codec, err = codecFor(c.Accept)
+	return err
+}
+
+// Decode decodes one record via the bound accept codec.
+func (c *acceptConfig) Decode(data []byte) (any, error) {
+	return c.codec.Decode(data)
+}
+
+// sparse reports whether the accept side carries bare terminal refs.
+func (c *acceptConfig) sparse() bool {
+	return stringy(c.Accept)
+}
+
+// emitConfig is the embeddable output-codec half of a resource config.
+// Producers and transformers embed it to gain the `emit` field plus a
+// bound Encode. Call bind once after parse.
+type emitConfig struct {
+	Emit  string `psy:"emit"`
+	codec sdk.Codec
+}
+
+func (c *emitConfig) bind() (err error) {
+	c.codec, err = codecFor(c.Emit)
+	return err
+}
+
+// Encode encodes one record via the bound emit codec.
+func (c *emitConfig) Encode(v any) ([]byte, error) {
+	return c.codec.Encode(v)
+}
+
+// sparse reports whether the emit side carries bare terminal refs.
+func (c *emitConfig) sparse() bool {
+	return stringy(c.Emit)
 }
 
 // sendErr forwards err onto errs, giving up if ctx is cancelled first.

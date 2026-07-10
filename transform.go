@@ -79,15 +79,20 @@ func parseUserBy(v, resource string) (byNick bool, err error) {
 //
 // name       — resource label used in per-record error text.
 // targetRef  — extract T's terminal ref from a rich source map.
-//              Nil-ok = second return false. A miss triggers the
-//              fallback resolve path (fetch the source, extract from
-//              its authoritative shape) when possible.
+//
+//	Nil-ok = second return false. A miss triggers the
+//	fallback resolve path (fetch the source, extract from
+//	its authoritative shape) when possible.
+//
 // resolveRef — fetch the source S by its ref, return T's ref.
-//              Used on the sparse-in / rich-in-with-miss paths.
-//              For same-entity resources (content/user/channel)
-//              S=T and this is a no-op that echoes ref back.
+//
+//	Used on the sparse-in / rich-in-with-miss paths.
+//	For same-entity resources (content/user/channel)
+//	S=T and this is a no-op that echoes ref back.
+//
 // fetchTarget — hydrate T by ref. (nil, nil) = not-found, drops the
-//              record. Only called when emit is rich.
+//
+//	record. Only called when emit is rich.
 type enrichSpec struct {
 	name        string
 	targetRef   func(m map[string]any) (string, bool)
@@ -101,7 +106,7 @@ type enrichSpec struct {
 // stop (context cancelled during error send); true means continue —
 // either with a real ref, or with "" for a per-record drop / delivered
 // error.
-func resolveOne(ctx context.Context, data []byte, accept sdk.Codec, spec enrichSpec, errs chan<- error) (ref string, cont bool) {
+func resolveOne(ctx context.Context, data []byte, accept *acceptConfig, spec enrichSpec, errs chan<- error) (ref string, cont bool) {
 	decoded, err := accept.Decode(data)
 	if err != nil {
 		return "", sendErr(ctx, errs, err)
@@ -141,8 +146,8 @@ func resolveOne(ctx context.Context, data []byte, accept sdk.Codec, spec enrichS
 // the ref itself; rich-out fetches T and encodes it. A nil target from
 // fetchTarget signals not-found — returned as (nil, true) so the caller
 // drops the record and keeps looping.
-func emitOne(ctx context.Context, ref string, sparseOut bool, spec enrichSpec, emit sdk.Codec, errs chan<- error) (b []byte, cont bool) {
-	if sparseOut {
+func emitOne(ctx context.Context, ref string, spec enrichSpec, emit *emitConfig, errs chan<- error) (b []byte, cont bool) {
+	if emit.sparse() {
 		encoded, err := emit.Encode(ref)
 		if err != nil {
 			return nil, sendErr(ctx, errs, err)
@@ -180,7 +185,7 @@ func emitOne(ctx context.Context, ref string, sparseOut bool, spec enrichSpec, e
 // Shutdown: in closes → stage A closes refs → stage B drains → stage B
 // closes out. ctx cancels either stage independently; both stages
 // ctx-select on every read and write, so neither can wedge.
-func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error, accept, emit sdk.Codec, sparseOut bool, buffer int, spec enrichSpec) {
+func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error, accept *acceptConfig, emit *emitConfig, buffer int, spec enrichSpec) {
 	if buffer < 0 {
 		buffer = 0
 	}
@@ -221,7 +226,7 @@ func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs ch
 			if !ok {
 				return
 			}
-			b, cont := emitOne(ctx, ref, sparseOut, spec, emit, errs)
+			b, cont := emitOne(ctx, ref, spec, emit, errs)
 			if !cont {
 				return
 			}
@@ -276,11 +281,15 @@ func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs ch
 func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
+		acceptConfig
+		emitConfig
 		EmitBy string `psy:"emit-by"`
-		Accept string `psy:"accept"`
-		Emit   string `psy:"emit"`
 		Buffer int    `psy:"buffer"`
-	}{EmitBy: "id", Accept: "json", Emit: "json"}
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+		EmitBy:       "id",
+	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
@@ -290,12 +299,10 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	accept, err := codecFor(config.Accept)
-	if err != nil {
+	if err := config.acceptConfig.bind(); err != nil {
 		return nil, err
 	}
-	emit, err := codecFor(config.Emit)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -304,7 +311,6 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
 
 	// pickCreatorField extracts creator.id or creator.nick per emit-by
@@ -365,7 +371,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
+		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
 	}, nil
 }
 
@@ -400,24 +406,25 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
-		Accept string `psy:"accept"`
-		Emit   string `psy:"emit"`
-		Buffer int    `psy:"buffer"`
-	}{Accept: "json", Emit: "json"}
+		acceptConfig
+		emitConfig
+		Buffer int `psy:"buffer"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
 
-	if stringy(config.Emit) {
+	if config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-tags: emit %q not supported — a tag list has no terminal reference", config.Emit)
 	}
 
-	accept, err := codecFor(config.Accept)
-	if err != nil {
+	if err := config.acceptConfig.bind(); err != nil {
 		return nil, err
 	}
-	emit, err := codecFor(config.Emit)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -450,7 +457,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	// resolveTags is stage A's per-record body. Returns nil tags for a
 	// drop; cont=false means bail.
 	resolveTags := func(ctx context.Context, data []byte, errs chan<- error) (tags []string, cont bool) {
-		decoded, err := accept.Decode(data)
+		decoded, err := config.acceptConfig.Decode(data)
 		if err != nil {
 			return nil, sendErr(ctx, errs, err)
 		}
@@ -527,7 +534,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				if !ok {
 					return
 				}
-				b, err := emit.Encode(tagsEnvelope{Tags: tags})
+				b, err := config.emitConfig.Encode(tagsEnvelope{Tags: tags})
 				if err != nil {
 					if !sendErr(ctx, errs, err) {
 						return
@@ -572,24 +579,25 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
-		Accept string `psy:"accept"`
-		Emit   string `psy:"emit"`
-		Buffer int    `psy:"buffer"`
-	}{Accept: "json", Emit: "json"}
+		acceptConfig
+		emitConfig
+		Buffer int `psy:"buffer"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
 
-	if stringy(config.Accept) && stringy(config.Emit) {
+	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-content: accept=string emit=string is a no-op (id → same id)")
 	}
 
-	accept, err := codecFor(config.Accept)
-	if err != nil {
+	if err := config.acceptConfig.bind(); err != nil {
 		return nil, err
 	}
-	emit, err := codecFor(config.Emit)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -598,7 +606,6 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
 
 	spec := enrichSpec{
@@ -623,7 +630,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
+		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
 	}, nil
 }
 
@@ -634,9 +641,9 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 // colliding with the produce.go userConfig.
 type userConfigT struct {
 	authConfig
+	acceptConfig
+	emitConfig
 	By     string `psy:"by"`
-	Accept string `psy:"accept"`
-	Emit   string `psy:"emit"`
 	Buffer int    `psy:"buffer"`
 }
 
@@ -672,7 +679,11 @@ type userConfigT struct {
 //	  emit   = "json"
 //	}
 func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
-	config := &userConfigT{By: "id", Accept: "json", Emit: "json"}
+	config := &userConfigT{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+		By:           "id",
+	}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
@@ -684,16 +695,14 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	// Sparse→sparse is identity in both modes: the reference axis
 	// stays consistent throughout the pipeline (id in, id out, or
 	// nick in, nick out — no cross-axis conversion).
-	if stringy(config.Accept) && stringy(config.Emit) {
+	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-user: accept=string emit=string is a no-op (%s → same %s)", config.By, config.By)
 	}
 
-	accept, err := codecFor(config.Accept)
-	if err != nil {
+	if err := config.acceptConfig.bind(); err != nil {
 		return nil, err
 	}
-	emit, err := codecFor(config.Emit)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -702,7 +711,6 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
 	key := "id"
 	if byNick {
@@ -741,7 +749,7 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
+		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
 	}, nil
 }
 
@@ -772,24 +780,25 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
-		Accept string `psy:"accept"`
-		Emit   string `psy:"emit"`
-		Buffer int    `psy:"buffer"`
-	}{Accept: "json", Emit: "json"}
+		acceptConfig
+		emitConfig
+		Buffer int `psy:"buffer"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
 
-	if stringy(config.Accept) && stringy(config.Emit) {
+	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-channel: accept=string emit=string is a no-op (name → same name)")
 	}
 
-	accept, err := codecFor(config.Accept)
-	if err != nil {
+	if err := config.acceptConfig.bind(); err != nil {
 		return nil, err
 	}
-	emit, err := codecFor(config.Emit)
-	if err != nil {
+	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -803,7 +812,6 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	sparseOut := stringy(config.Emit)
 	buffer := config.Buffer
 
 	spec := enrichSpec{
@@ -827,6 +835,6 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
+		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
 	}, nil
 }
