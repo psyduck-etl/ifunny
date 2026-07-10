@@ -121,3 +121,23 @@ func emitSpec() *sdk.Spec {
 		Default:     "json",
 	}
 }
+
+// bufferSpec is the size of the internal channel between a transformer's
+// resolve stage (decode + obtain target ref) and its emit stage (fetch +
+// encode). The two stages always run as separate goroutines, so even a
+// buffer of 0 pipelines: the resolve stage can decode record N+1 while
+// the emit stage fetches record N. A larger buffer absorbs jitter — e.g.
+// an occasional slow fetch in the emit stage — at the cost of memory
+// (buffer × ref size).
+//
+// Not to be confused with the host-owned per-block buffering on producer
+// and consumer blocks; this one is internal to a single transformer
+// instance.
+func bufferSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "buffer",
+		Description: "size of the internal channel between the transformer's resolve and emit stages; 0 still pipelines the two stages",
+		Type:        sdk.TypeInt,
+		Default:     0,
+	}
+}

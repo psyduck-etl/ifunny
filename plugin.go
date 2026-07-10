@@ -231,19 +231,19 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-author",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: authorTransformer,
-			Spec:               specs(acceptSpec(), emitSpec()),
+			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
-			Spec:               specs(acceptSpec(), emitSpec()),
+			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-content",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: contentTransformer,
-			Spec:               specs(acceptSpec(), emitSpec()),
+			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-user",
@@ -264,13 +264,14 @@ func Plugin() sdk.Plugin {
 				},
 				acceptSpec(),
 				emitSpec(),
+				bufferSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-channel",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: channelTransformer,
-			Spec:               specs(acceptSpec(), emitSpec()),
+			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
 		},
 	)
 }

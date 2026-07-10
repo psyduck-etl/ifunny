@@ -80,123 +80,142 @@ type enrichSpec struct {
 	fetchTarget func(targetRef string) (any, error)
 }
 
-// runEnrich drains in, dispatching each record through spec + the two
-// codecs per the accept/emit matrix. All error sends go through sendErr
-// so a cancelled context can't block. Output channel is always closed
-// on return.
-func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error, accept, emit sdk.Codec, sparseOut bool, spec enrichSpec) {
+// resolveOne is the per-record body of the resolve stage. It decodes a
+// record via accept and returns T's terminal ref (or "" to drop). The
+// cont return controls the outer loop: false means the caller should
+// stop (context cancelled during error send); true means continue —
+// either with a real ref, or with "" for a per-record drop / delivered
+// error.
+func resolveOne(ctx context.Context, data []byte, accept sdk.Codec, spec enrichSpec, errs chan<- error) (ref string, cont bool) {
+	decoded, err := accept.Decode(data)
+	if err != nil {
+		return "", sendErr(ctx, errs, err)
+	}
+	switch v := decoded.(type) {
+	case string:
+		// Sparse in: the input is S's terminal ref. resolveRef
+		// echoes it back on identity resources and fetches S on
+		// cross-entity ones (e.g. author reads content → creator.id).
+		r, err := spec.resolveRef(v)
+		if err != nil {
+			return "", sendErr(ctx, errs, err)
+		}
+		return r, true
+	case map[string]any:
+		// Rich in fast path: try to extract T's ref from the map.
+		if r, ok := spec.targetRef(v); ok {
+			return r, true
+		}
+		// Rich in fallback: use the source's own id to fetch S
+		// and re-extract T's ref from the authoritative response.
+		sourceRef, ok := v["id"].(string)
+		if !ok || sourceRef == "" {
+			return "", sendErr(ctx, errs, fmt.Errorf("%s: rich input missing target and cannot fall back (no id field)", spec.name))
+		}
+		r, err := spec.resolveRef(sourceRef)
+		if err != nil {
+			return "", sendErr(ctx, errs, err)
+		}
+		return r, true
+	default:
+		return "", sendErr(ctx, errs, fmt.Errorf("%s: cannot dispatch input of type %T", spec.name, decoded))
+	}
+}
+
+// emitOne is the per-record body of the emit stage. Sparse-out encodes
+// the ref itself; rich-out fetches T and encodes it. A nil target from
+// fetchTarget signals not-found — returned as (nil, true) so the caller
+// drops the record and keeps looping.
+func emitOne(ctx context.Context, ref string, sparseOut bool, spec enrichSpec, emit sdk.Codec, errs chan<- error) (b []byte, cont bool) {
+	if sparseOut {
+		encoded, err := emit.Encode(ref)
+		if err != nil {
+			return nil, sendErr(ctx, errs, err)
+		}
+		return encoded, true
+	}
+	target, err := spec.fetchTarget(ref)
+	if err != nil {
+		return nil, sendErr(ctx, errs, err)
+	}
+	if target == nil {
+		return nil, true // drop
+	}
+	encoded, err := emit.Encode(target)
+	if err != nil {
+		return nil, sendErr(ctx, errs, err)
+	}
+	return encoded, true
+}
+
+// runEnrich is a two-stage pipeline. Stage A (spawned goroutine) drains
+// in, calls resolveOne per record, and pushes refs onto an internal
+// channel of the caller-configured buffer size. Stage B (runs in the
+// transformer's own goroutine so runEnrich returns after out is closed)
+// pulls refs off, calls emitOne, and writes to out.
+//
+// Ordering is preserved: stage A processes in order and pushes in order;
+// stage B pulls in order and pushes in order.
+//
+// Concurrency win: on cells where both halves fetch (author sparse→rich,
+// or user by-nick sparse→rich), the two fetches for consecutive records
+// overlap — up to buffer+1 records can be simultaneously in flight
+// across the two stages.
+//
+// Shutdown: in closes → stage A closes refs → stage B drains → stage B
+// closes out. ctx cancels either stage independently; both stages
+// ctx-select on every read and write, so neither can wedge.
+func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error, accept, emit sdk.Codec, sparseOut bool, buffer int, spec enrichSpec) {
+	if buffer < 0 {
+		buffer = 0
+	}
+	refs := make(chan string, buffer)
+
+	// Stage A: decode + resolve. Owns closing refs.
+	go func() {
+		defer close(refs)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				ref, cont := resolveOne(ctx, data, accept, spec, errs)
+				if !cont {
+					return
+				}
+				if ref == "" {
+					continue // drop / delivered error
+				}
+				select {
+				case refs <- ref:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Stage B: fetch + encode. Owns closing out.
 	defer close(out)
-
-	send := func(b []byte) bool {
-		select {
-		case out <- b:
-			return true
-		case <-ctx.Done():
-			return false
-		}
-	}
-
-	// emitRef encodes a target ref via the emit codec (sparse out).
-	emitRef := func(ref string) bool {
-		b, err := emit.Encode(ref)
-		if err != nil {
-			return sendErr(ctx, errs, err)
-		}
-		return send(b)
-	}
-
-	// emitRich fetches T by ref and encodes it via the emit codec
-	// (rich out). A nil target drops the record.
-	emitRich := func(ref string) bool {
-		target, err := spec.fetchTarget(ref)
-		if err != nil {
-			return sendErr(ctx, errs, err)
-		}
-		if target == nil {
-			return true // drop
-		}
-		b, err := emit.Encode(target)
-		if err != nil {
-			return sendErr(ctx, errs, err)
-		}
-		return send(b)
-	}
-
 	for {
 		select {
-		case data, ok := <-in:
+		case ref, ok := <-refs:
 			if !ok {
 				return
 			}
-			decoded, err := accept.Decode(data)
-			if err != nil {
-				if !sendErr(ctx, errs, err) {
-					return
-				}
-				continue
+			b, cont := emitOne(ctx, ref, sparseOut, spec, emit, errs)
+			if !cont {
+				return
 			}
-
-			var ref string
-			switch v := decoded.(type) {
-			case string:
-				// Sparse in: the input is S's terminal ref.
-				// Resolve to T's ref (identity resources
-				// return it unchanged; cross-entity resources
-				// fetch S here).
-				r, err := spec.resolveRef(v)
-				if err != nil {
-					if !sendErr(ctx, errs, err) {
-						return
-					}
-					continue
-				}
-				ref = r
-			case map[string]any:
-				// Rich in: try to extract T's ref from the
-				// map. On miss, fall back to resolving via
-				// the source's own ref (the map should carry
-				// S's id under the key resolveRef expects
-				// when read via the sparse-in path — we
-				// find that ref from the map's "id" field,
-				// which the ifunny API always populates).
-				if r, ok := spec.targetRef(v); ok {
-					ref = r
-					break
-				}
-				sourceRef, ok := v["id"].(string)
-				if !ok || sourceRef == "" {
-					if !sendErr(ctx, errs, fmt.Errorf("%s: rich input missing target and cannot fall back (no id field)", spec.name)) {
-						return
-					}
-					continue
-				}
-				r, err := spec.resolveRef(sourceRef)
-				if err != nil {
-					if !sendErr(ctx, errs, err) {
-						return
-					}
-					continue
-				}
-				ref = r
-			default:
-				if !sendErr(ctx, errs, fmt.Errorf("%s: cannot dispatch input of type %T", spec.name, decoded)) {
-					return
-				}
-				continue
+			if b == nil {
+				continue // drop / delivered error
 			}
-
-			if ref == "" {
-				// Not-found or degenerate: drop.
-				continue
-			}
-
-			var okSend bool
-			if sparseOut {
-				okSend = emitRef(ref)
-			} else {
-				okSend = emitRich(ref)
-			}
-			if !okSend {
+			select {
+			case out <- b:
+			case <-ctx.Done():
 				return
 			}
 		case <-ctx.Done():
@@ -239,6 +258,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		Accept string `psy:"accept"`
 		Emit   string `psy:"emit"`
+		Buffer int    `psy:"buffer"`
 	}{Accept: "json", Emit: "json"}
 	if err := parse(&config); err != nil {
 		return nil, err
@@ -259,6 +279,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	sparseOut := stringy(config.Emit)
+	buffer := config.Buffer
 
 	spec := enrichSpec{
 		name:      "ifunny-author",
@@ -301,7 +322,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	_ = authorRef{}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, spec)
+		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
 	}, nil
 }
 
@@ -338,6 +359,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		Accept string `psy:"accept"`
 		Emit   string `psy:"emit"`
+		Buffer int    `psy:"buffer"`
 	}{Accept: "json", Emit: "json"}
 	if err := parse(&config); err != nil {
 		return nil, err
@@ -361,106 +383,118 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
+	buffer := config.Buffer
+	if buffer < 0 {
+		buffer = 0
+	}
+
 	// tags doesn't fit runEnrich (no terminal target ref; the output
-	// is an aggregation rather than an entity). Inlining the loop
-	// keeps the extract-or-fetch semantics visible in one place.
+	// is an aggregation rather than an entity), but it still fits the
+	// two-stage pipe shape: stage A decodes + extracts-or-fetches the
+	// tag list, stage B encodes the envelope. The inter-stage channel
+	// carries []string instead of runEnrich's string.
+	fetchTags := func(contentID string) ([]string, error) {
+		content, err := client.GetContent(contentID)
+		if err != nil {
+			return nil, err
+		}
+		if content == nil {
+			return nil, nil
+		}
+		return content.Tags, nil
+	}
+
+	// resolveTags is stage A's per-record body. Returns nil tags for a
+	// drop; cont=false means bail.
+	resolveTags := func(ctx context.Context, data []byte, errs chan<- error) (tags []string, cont bool) {
+		decoded, err := accept.Decode(data)
+		if err != nil {
+			return nil, sendErr(ctx, errs, err)
+		}
+		switch v := decoded.(type) {
+		case string:
+			t, err := fetchTags(v)
+			if err != nil {
+				return nil, sendErr(ctx, errs, err)
+			}
+			return t, true
+		case map[string]any:
+			if raw, ok := v["tags"]; ok {
+				// Rich input carries a tag list — trust
+				// it (even empty, which drops).
+				list, _ := raw.([]any)
+				out := make([]string, 0, len(list))
+				for _, t := range list {
+					if s, ok := t.(string); ok {
+						out = append(out, s)
+					}
+				}
+				return out, true
+			}
+			// Rich but missing "tags": fall back by content id.
+			contentID, ok := v["id"].(string)
+			if !ok || contentID == "" {
+				return nil, sendErr(ctx, errs, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)"))
+			}
+			t, err := fetchTags(contentID)
+			if err != nil {
+				return nil, sendErr(ctx, errs, err)
+			}
+			return t, true
+		default:
+			return nil, sendErr(ctx, errs, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded))
+		}
+	}
+
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		tagsCh := make(chan []string, buffer)
+
+		// Stage A: decode + extract-or-fetch. Owns closing tagsCh.
+		go func() {
+			defer close(tagsCh)
+			for {
+				select {
+				case data, ok := <-in:
+					if !ok {
+						return
+					}
+					tags, cont := resolveTags(ctx, data, errs)
+					if !cont {
+						return
+					}
+					if len(tags) == 0 {
+						continue // drop / delivered error
+					}
+					select {
+					case tagsCh <- tags:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
+		// Stage B: encode. Owns closing out.
 		defer close(out)
-
-		fetchTags := func(contentID string) ([]string, error) {
-			content, err := client.GetContent(contentID)
-			if err != nil {
-				return nil, err
-			}
-			if content == nil {
-				return nil, nil
-			}
-			return content.Tags, nil
-		}
-
-		emitTags := func(tags []string) bool {
-			if len(tags) == 0 {
-				return true // drop
-			}
-			b, err := emit.Encode(tagsEnvelope{Tags: tags})
-			if err != nil {
-				return sendErr(ctx, errs, err)
-			}
-			select {
-			case out <- b:
-				return true
-			case <-ctx.Done():
-				return false
-			}
-		}
-
 		for {
 			select {
-			case data, ok := <-in:
+			case tags, ok := <-tagsCh:
 				if !ok {
 					return
 				}
-				decoded, err := accept.Decode(data)
+				b, err := emit.Encode(tagsEnvelope{Tags: tags})
 				if err != nil {
 					if !sendErr(ctx, errs, err) {
 						return
 					}
 					continue
 				}
-
-				switch v := decoded.(type) {
-				case string:
-					tags, err := fetchTags(v)
-					if err != nil {
-						if !sendErr(ctx, errs, err) {
-							return
-						}
-						continue
-					}
-					if !emitTags(tags) {
-						return
-					}
-				case map[string]any:
-					if raw, ok := v["tags"]; ok {
-						// Rich input carries a tag
-						// list — trust it (even
-						// empty, which drops).
-						list, _ := raw.([]any)
-						tags := make([]string, 0, len(list))
-						for _, t := range list {
-							if s, ok := t.(string); ok {
-								tags = append(tags, s)
-							}
-						}
-						if !emitTags(tags) {
-							return
-						}
-						continue
-					}
-					// Rich but missing "tags": fall back
-					// by content id.
-					contentID, ok := v["id"].(string)
-					if !ok || contentID == "" {
-						if !sendErr(ctx, errs, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)")) {
-							return
-						}
-						continue
-					}
-					tags, err := fetchTags(contentID)
-					if err != nil {
-						if !sendErr(ctx, errs, err) {
-							return
-						}
-						continue
-					}
-					if !emitTags(tags) {
-						return
-					}
-				default:
-					if !sendErr(ctx, errs, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded)) {
-						return
-					}
-					continue
+				select {
+				case out <- b:
+				case <-ctx.Done():
+					return
 				}
 			case <-ctx.Done():
 				return
@@ -497,6 +531,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		Accept string `psy:"accept"`
 		Emit   string `psy:"emit"`
+		Buffer int    `psy:"buffer"`
 	}{Accept: "json", Emit: "json"}
 	if err := parse(&config); err != nil {
 		return nil, err
@@ -521,6 +556,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	sparseOut := stringy(config.Emit)
+	buffer := config.Buffer
 
 	spec := enrichSpec{
 		name: "ifunny-content",
@@ -544,7 +580,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, spec)
+		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
 	}, nil
 }
 
@@ -558,6 +594,7 @@ type userConfigT struct {
 	ByNick bool   `psy:"by-nick"`
 	Accept string `psy:"accept"`
 	Emit   string `psy:"emit"`
+	Buffer int    `psy:"buffer"`
 }
 
 // userTransformer builds the ifunny-user transformer. It hydrates a
@@ -621,6 +658,7 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	sparseOut := stringy(config.Emit)
+	buffer := config.Buffer
 	byNick := config.ByNick
 
 	// getUserByRef hits the right endpoint per by-id/by-nick and
@@ -688,7 +726,7 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, spec)
+		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
 	}, nil
 }
 
@@ -721,6 +759,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		Accept string `psy:"accept"`
 		Emit   string `psy:"emit"`
+		Buffer int    `psy:"buffer"`
 	}{Accept: "json", Emit: "json"}
 	if err := parse(&config); err != nil {
 		return nil, err
@@ -750,6 +789,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	sparseOut := stringy(config.Emit)
+	buffer := config.Buffer
 
 	spec := enrichSpec{
 		name: "ifunny-channel",
@@ -772,6 +812,6 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, spec)
+		runEnrich(ctx, in, out, errs, accept, emit, sparseOut, buffer, spec)
 	}, nil
 }

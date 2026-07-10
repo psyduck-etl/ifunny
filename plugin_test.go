@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/psyduck-etl/sdk"
 )
@@ -74,11 +76,11 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
 	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
 	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
-	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
-	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
-	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
-	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "accept", "emit"}},
-	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
+	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
+	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
+	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "accept", "emit", "buffer"}},
+	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -264,7 +266,7 @@ func TestRunEnrichSparseIn_SparseOut(t *testing.T) {
 	in <- []byte("xyz")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, stringCodec{}, true, spec)
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, stringCodec{}, true, 0, spec)
 
 	var got [][]byte
 	for b := range out {
@@ -293,7 +295,7 @@ func TestRunEnrichSparseIn_RichOut(t *testing.T) {
 	in <- []byte("xyz")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, spec)
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, 0, spec)
 
 	got := new(testEntity)
 	b := <-out
@@ -324,7 +326,7 @@ func TestRunEnrichRichIn_SparseOut(t *testing.T) {
 	in <- []byte(`{"id":"abc","name":"hydrated"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, spec)
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, 0, spec)
 
 	b := <-out
 	if string(b) != "abc" {
@@ -349,7 +351,7 @@ func TestRunEnrichRichIn_RichOut(t *testing.T) {
 	in <- []byte(`{"id":"abc","name":"stale-cache"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, spec)
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, 0, spec)
 
 	got := new(testEntity)
 	if err := json.Unmarshal(<-out, got); err != nil {
@@ -379,7 +381,7 @@ func TestRunEnrichRichMissingTargetFallsBack(t *testing.T) {
 	in <- []byte(`{"id":"src-id","name":"no-target"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, spec)
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, 0, spec)
 
 	b := <-out
 	if string(b) != "src-id" {
@@ -404,7 +406,7 @@ func TestRunEnrichNotFoundDrops(t *testing.T) {
 	in <- []byte("missing")
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, spec)
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, 0, spec)
 
 	if _, ok := <-out; ok {
 		t.Errorf("expected no output on not-found")
@@ -424,7 +426,7 @@ func TestRunEnrichUnusableRichErrors(t *testing.T) {
 	in <- []byte(`{"other":"foo"}`)
 	close(in)
 
-	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, spec)
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, 0, spec)
 
 	select {
 	case err := <-errs:
@@ -433,5 +435,75 @@ func TestRunEnrichUnusableRichErrors(t *testing.T) {
 		}
 	default:
 		t.Errorf("expected an error on unusable rich input")
+	}
+}
+
+// TestRunEnrichPipelinesConcurrently verifies the two-stage pipe
+// property: while stage B is blocked fetching record 0, stage A should
+// keep decoding records and pushing them into the inter-stage buffer.
+// Without pipelining, stage A cannot advance until stage B accepts each
+// ref, and targetRef would be called at most once before the gate opens.
+//
+// Concretely: count targetRef invocations (stage A's per-record work)
+// while stage B is blocked. With buffer=N, stage A should be able to
+// process 1 (in-flight in B) + N (waiting in refs) = N+1 records before
+// blocking on a full buffer.
+func TestRunEnrichPipelinesConcurrently(t *testing.T) {
+	const records = 8
+	const buffer = 4
+
+	var mu sync.Mutex
+	targetRefCalls := 0
+	gate := make(chan struct{})
+
+	spec := enrichSpec{
+		name: "test",
+		targetRef: func(m map[string]any) (string, bool) {
+			mu.Lock()
+			targetRefCalls++
+			mu.Unlock()
+			s, ok := m["id"].(string)
+			return s, ok
+		},
+		resolveRef: func(ref string) (string, error) { return ref, nil },
+		fetchTarget: func(ref string) (any, error) {
+			<-gate // stage B blocked here for every record
+			return &testEntity{ID: ref}, nil
+		},
+	}
+
+	in := make(chan []byte, records)
+	out := make(chan []byte, records)
+	errs := make(chan error, records)
+
+	for i := 0; i < records; i++ {
+		in <- []byte(`{"id":"x"}`)
+	}
+	close(in)
+
+	done := make(chan struct{})
+	go func() {
+		runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, buffer, spec)
+		close(done)
+	}()
+
+	// Let stage A run to steady state — it can process at most
+	// buffer+1 records before blocking (buffer refs queued + 1 held by
+	// stage B, who's parked on gate).
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	stalled := targetRefCalls
+	mu.Unlock()
+
+	// Release stage B so runEnrich can finish.
+	close(gate)
+	<-done
+
+	// Sequential model: targetRefCalls would be 1 here (stage A can't
+	// advance while stage B holds it, both in one goroutine).
+	// Piped model: stage A gets to buffer+1 records before blocking.
+	if stalled < buffer+1 {
+		t.Errorf("stage A only processed %d records while stage B blocked; want ≥ %d (buffer+1)", stalled, buffer+1)
 	}
 }
