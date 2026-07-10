@@ -62,12 +62,28 @@ func extractAuthor(data []byte) (authorRef, bool, error) {
 // dropped from the pipeline (simply not written to out), which the host
 // treats as "skip this datum".
 //
-// Takes no config — the transformer is a pure JSON reshape.
+// Takes an encoding spec (default "json") for decode/encode.
 //
 // Example (glue step between posts and their commenters' timelines):
 //
-//	transform "ifunny-author" "author" {}
-func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
+//	transform "ifunny-author" "author" {
+//	  encoding = "json"
+//	}
+func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		Encoding string `psy:"encoding"`
+	}{Encoding: "json"}
+	if parse != nil {
+		if err := parse(&config); err != nil {
+			return nil, err
+		}
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
+		return nil, err
+	}
+
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		defer close(out)
 		for {
@@ -78,10 +94,8 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 				}
 				author, found, err := extractAuthor(data)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -89,12 +103,10 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 					// Drop entities with no resolvable author.
 					continue
 				}
-				marshalled, err := json.Marshal(author)
+				marshalled, err := codec.Encode(author)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -124,41 +136,55 @@ func authorTransformer(sdk.Parser) (sdk.Transformer, error) {
 // scalar field per record) therefore need a one-record-per-tag stream,
 // which an explode step upstream of them must provide — see the README.
 //
-// Takes no config.
+// Takes an encoding spec (default "json").
 //
 // Example:
 //
-//	transform "ifunny-tags" "tags" {}
-func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
+//	transform "ifunny-tags" "tags" {
+//	  encoding = "json"
+//	}
+func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		Encoding string `psy:"encoding"`
+	}{Encoding: "json"}
+	if parse != nil {
+		if err := parse(&config); err != nil {
+			return nil, err
+		}
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
+		return nil, err
+	}
+
+	type envelope struct {
+		Tags []string `json:"tags"`
+	}
+
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		defer close(out)
+		env := new(envelope)
 		for {
 			select {
 			case data, ok := <-in:
 				if !ok {
 					return
 				}
-				envelope := new(struct {
-					Tags []string `json:"tags"`
-				})
-				if err := json.Unmarshal(data, envelope); err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+				if err := json.Unmarshal(data, env); err != nil {
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
-				if len(envelope.Tags) == 0 {
+				if len(env.Tags) == 0 {
 					// Drop posts with no tags.
 					continue
 				}
-				marshalled, err := json.Marshal(envelope)
+				marshalled, err := codec.Encode(env)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -175,35 +201,31 @@ func tagsTransformer(sdk.Parser) (sdk.Transformer, error) {
 }
 
 // lookup builds a hydration transformer: it reads an {"id": ...} envelope
-// from the input, resolves the full entity via looker, and re-emits it as
-// JSON. A nil result from looker (e.g. a not-found user) drops the datum.
-func lookup(looker func(id string) (any, error)) sdk.Transformer {
+// from the input, resolves the full entity via looker, and re-emits it
+// using codec. A nil result from looker (e.g. a not-found user) drops the datum.
+func lookup(codec sdk.Codec, looker func(id string) (any, error)) sdk.Transformer {
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		defer close(out)
+		identity := new(struct {
+			ID string `json:"id"`
+		})
 		for {
 			select {
 			case data, ok := <-in:
 				if !ok {
 					return
 				}
-				identity := new(struct {
-					ID string `json:"id"`
-				})
 				if err := json.Unmarshal(data, identity); err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
 
 				found, err := looker(identity.ID)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -212,12 +234,10 @@ func lookup(looker func(id string) (any, error)) sdk.Transformer {
 					continue
 				}
 
-				marshalled, err := json.Marshal(found)
+				marshalled, err := codec.Encode(found)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -237,7 +257,8 @@ func lookup(looker func(id string) (any, error)) sdk.Transformer {
 // a light Content reference — a record whose "id" field carries the
 // content id — into the full Content object.
 //
-// Takes only the shared auth surface; the input's "id" keys the lookup.
+// Takes the shared auth surface and an encoding spec (default "json");
+// the input's "id" keys the lookup.
 //
 // Example:
 //
@@ -247,14 +268,29 @@ func lookup(looker func(id string) (any, error)) sdk.Transformer {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
+//	  encoding = "json"
 //	}
 func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
-	client, _, err := newClient(parse)
+	// Parse config with auth + encoding
+	config := struct {
+		authConfig
+		Encoding string `psy:"encoding"`
+	}{Encoding: "json"}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	codec, err := codecFor(config.Encoding)
 	if err != nil {
 		return nil, err
 	}
 
-	return lookup(func(id string) (any, error) {
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return lookup(codec, func(id string) (any, error) {
 		return client.GetContent(id)
 	}), nil
 }
@@ -265,8 +301,9 @@ func lookupContent(parse sdk.Parser) (sdk.Transformer, error) {
 // caller picks explicitly rather than the transformer defaulting.
 type lookupUserConfig struct {
 	authConfig
-	ByID   bool `psy:"by-id"`
-	ByNick bool `psy:"by-nick"`
+	ByID     bool   `psy:"by-id"`
+	ByNick   bool   `psy:"by-nick"`
+	Encoding string `psy:"encoding"`
 }
 
 // lookupUser builds the ifunny-lookup-user transformer. It hydrates a
@@ -275,7 +312,7 @@ type lookupUserConfig struct {
 // drops the datum rather than failing the pipeline.
 //
 // Set exactly one of by-id / by-nick to pick which field of the input
-// records the lookup keys on.
+// records the lookup keys on. Takes an encoding spec (default "json").
 //
 // Example (chain after ifunny-author to hydrate commenter identities):
 //
@@ -286,6 +323,7 @@ type lookupUserConfig struct {
 //	    device-version = "14"
 //	  }
 //	  by-id = true
+//	  encoding = "json"
 //	}
 //
 // Example (lookup by nick when the upstream carries handles, not ids):
@@ -297,9 +335,10 @@ type lookupUserConfig struct {
 //	    device-version = "14"
 //	  }
 //	  by-nick = true
+//	  encoding = "json"
 //	}
 func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
-	config := new(lookupUserConfig)
+	config := &lookupUserConfig{Encoding: "json"}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
@@ -312,6 +351,11 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, fmt.Errorf("ifunny-lookup-user: exactly one of by-id or by-nick is required")
 	}
 
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
+		return nil, err
+	}
+
 	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
@@ -322,21 +366,19 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 	// same upstream datum.
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		defer close(out)
+		identity := new(struct {
+			ID   string `json:"id"`
+			Nick string `json:"nick"`
+		})
 		for {
 			select {
 			case data, ok := <-in:
 				if !ok {
 					return
 				}
-				identity := new(struct {
-					ID   string `json:"id"`
-					Nick string `json:"nick"`
-				})
 				if err := json.Unmarshal(data, identity); err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -352,20 +394,16 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 					if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 						continue
 					}
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
 
-				marshalled, err := json.Marshal(user)
+				marshalled, err := codec.Encode(user)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -386,7 +424,7 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 // channel name — into the full ChatChannel object.
 //
 // Channels are keyed by name (not a numeric id), so this transformer
-// bypasses the shared lookup helper and reads the "name" field directly.
+// reads the "name" field directly. Takes an encoding spec (default "json").
 //
 // Example:
 //
@@ -396,9 +434,24 @@ func lookupUser(parse sdk.Parser) (sdk.Transformer, error) {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
+//	  encoding = "json"
 //	}
 func lookupChannel(parse sdk.Parser) (sdk.Transformer, error) {
-	client, _, err := newClient(parse)
+	// Parse config with auth + encoding
+	config := struct {
+		authConfig
+		Encoding string `psy:"encoding"`
+	}{Encoding: "json"}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -412,30 +465,26 @@ func lookupChannel(parse sdk.Parser) (sdk.Transformer, error) {
 	// "name" field rather than going through the shared lookup helper.
 	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
 		defer close(out)
+		identity := new(struct {
+			Name string `json:"name"`
+		})
 		for {
 			select {
 			case data, ok := <-in:
 				if !ok {
 					return
 				}
-				identity := new(struct {
-					Name string `json:"name"`
-				})
 				if err := json.Unmarshal(data, identity); err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
 
 				channel, err := chat.GetChannel(compose.GetChannel(identity.Name))
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}
@@ -444,12 +493,10 @@ func lookupChannel(parse sdk.Parser) (sdk.Transformer, error) {
 					continue
 				}
 
-				marshalled, err := json.Marshal(channel)
+				marshalled, err := codec.Encode(channel)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					continue
 				}

@@ -6,7 +6,7 @@ toolchain go1.24.13
 
 require (
 	github.com/open-ifunny/ifunny-go v0.1.0
-	github.com/psyduck-etl/sdk v0.5.2-0.20260709223730-a234057e666a
+	github.com/psyduck-etl/sdk v0.5.3-0.20260709235217-05c9ad747f44
 )
 
 require (

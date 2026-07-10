@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
@@ -14,13 +13,15 @@ import (
 // channel name.
 type chatConfig struct {
 	authConfig
-	Channel string `psy:"channel"`
+	Channel  string `psy:"channel"`
+	Encoding string `psy:"encoding"`
 }
 
 // produceChatHistory builds the ifunny-chat-history producer. It backfills
 // a public channel's message history over the WAMP connection, emitting
-// each ChatEvent as JSON. IterMessages walks the channel newest-to-oldest
-// and terminates on its own, so this drains it like any REST iterator.
+// each ChatEvent via codec (default "json"). IterMessages walks the channel
+// newest-to-oldest and terminates on its own, so this drains it like any
+// REST iterator.
 //
 // Requires auth-bearer: iFunny's chat WAMP handshake authenticates with a
 // bearer ticket and rejects anonymous (basic) clients.
@@ -34,10 +35,16 @@ type chatConfig struct {
 //	    device-version = "14"
 //	  }
 //	  channel = "chat.some-channel-name"
+//	  encoding = "json"
 //	}
 func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
-	config := new(chatConfig)
+	config := &chatConfig{Encoding: "json"}
 	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
 		return nil, err
 	}
 
@@ -53,7 +60,7 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		iter := chat.IterMessages(compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
-		produceIter(ctx, iter, send, errs)
+		produceIter(ctx, iter, send, errs, codec)
 	}, nil
 }
 
@@ -65,22 +72,23 @@ type chatListenConfig struct {
 	authConfig
 	Channel   string `psy:"channel"`
 	StopAfter int    `psy:"stop-after"`
+	Encoding  string `psy:"encoding"`
 }
 
 // produceChatListen builds the ifunny-chat-listen producer. It streams
-// live events from a public channel, emitting each ChatEvent as JSON. A
-// live subscription has no natural end — the SDK Producer signature carries
-// no cancellation channel — so the resource declares its own stop-after to
-// bound the listen and unsubscribe cleanly. StopAfter of 0 listens until
-// the process exits.
+// live events from a public channel, emitting each ChatEvent via codec
+// (default "json"). A live subscription has no natural end — the SDK
+// Producer signature carries no cancellation channel — so the resource
+// declares its own stop-after to bound the listen and unsubscribe cleanly.
+// StopAfter of 0 listens until the process exits.
 //
 // OnChannelEvent delivers events on the websocket's goroutine via a
-// callback. We bridge those onto an internal channel and marshal them on
+// callback. We bridge those onto an internal channel and encode them on
 // the producer goroutine. A done channel lets the callback abandon a send
 // the moment we stop, so a late event can never block on a listener that
 // has already gone away, and sync.Once makes teardown safe to call twice.
 //
-// Requires auth-bearer.
+// Requires auth-bearer. Takes an encoding spec (default "json").
 //
 // Example:
 //
@@ -91,11 +99,17 @@ type chatListenConfig struct {
 //	    device-version = "14"
 //	  }
 //	  channel    = "chat.some-channel-name"
+//	  encoding   = "json"
 //	  stop-after = 100
 //	}
 func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
-	config := new(chatListenConfig)
+	config := &chatListenConfig{Encoding: "json"}
 	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
 		return nil, err
 	}
 
@@ -123,9 +137,8 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			select {
-			case errs <- err:
-			case <-ctx.Done():
+			if ctx.Err() == nil {
+				errs <- err
 			}
 			return
 		}
@@ -143,12 +156,10 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		for {
 			select {
 			case event := <-events:
-				b, err := json.Marshal(event)
+				b, err := codec.Encode(event)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					return
 				}
@@ -176,21 +187,24 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 // scoped to the authenticated user, not to a specific channel.
 type invitesConfig struct {
 	authConfig
-	StopAfter int `psy:"stop-after"`
+	StopAfter int    `psy:"stop-after"`
+	Encoding  string `psy:"encoding"`
 }
 
 // produceChatInvites builds the ifunny-chat-invites producer. It streams
 // live channel invites received by the logged-in user, emitting each as a
-// ChatChannel JSON entity — the same shape ifunny-channels emits, so it
-// chains straight into ifunny-chat-history or ifunny-chat-listen. Like
-// ifunny-chat-listen, the subscription has no natural end, so this
-// resource declares its own stop-after (0 = listen until process exits).
+// ChatChannel entity encoded via codec (default "json") — the same shape
+// ifunny-channels emits, so it chains straight into ifunny-chat-history or
+// ifunny-chat-listen. Like ifunny-chat-listen, the subscription has no
+// natural end, so this resource declares its own stop-after (0 = listen
+// until process exits).
 //
 // Unlike ifunny-chat-listen this is not a per-channel subscription — the
 // underlying WAMP topic delivers every invite the current user gets.
 //
 // Requires auth-bearer: anonymous (auth-basic) clients have nothing to
-// receive — an "invited anonymous user" doesn't exist.
+// receive — an "invited anonymous user" doesn't exist. Takes an encoding
+// spec (default "json").
 //
 // Example:
 //
@@ -200,11 +214,17 @@ type invitesConfig struct {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
+//	  encoding = "json"
 //	  stop-after = 10
 //	}
 func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
-	config := new(invitesConfig)
+	config := &invitesConfig{Encoding: "json"}
 	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	codec, err := codecFor(config.Encoding)
+	if err != nil {
 		return nil, err
 	}
 
@@ -232,9 +252,8 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			select {
-			case errs <- err:
-			case <-ctx.Done():
+			if ctx.Err() == nil {
+				errs <- err
 			}
 			return
 		}
@@ -252,12 +271,10 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 		for {
 			select {
 			case channel := <-invites:
-				b, err := json.Marshal(channel)
+				b, err := codec.Encode(channel)
 				if err != nil {
-					select {
-					case errs <- err:
-					case <-ctx.Done():
-						return
+					if ctx.Err() == nil {
+						errs <- err
 					}
 					return
 				}

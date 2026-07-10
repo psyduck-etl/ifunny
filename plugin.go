@@ -17,12 +17,15 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-feed",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceFeed,
-			Spec: specs(&sdk.Spec{
-				Name:        "feed",
-				Description: "feed to pull content from, e.g. featured or collective",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "feed",
+					Description: "feed to pull content from, e.g. featured or collective",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-timeline",
@@ -41,6 +44,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Default:     "",
 				},
+				encodingSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -60,6 +64,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
+				encodingSpec(),
 			),
 		},
 
@@ -68,12 +73,15 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-comments",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceComments,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull comments from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "content",
+					Description: "content id to pull comments from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-replies",
@@ -92,6 +100,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
+				encodingSpec(),
 			),
 		},
 
@@ -100,45 +109,57 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-smiles",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSmiles,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull smiling users from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "content",
+					Description: "content id to pull smiling users from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-republishers",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceRepublishers,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull republishing users from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "content",
+					Description: "content id to pull republishing users from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-subscribers",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSubscribers,
-			Spec: specs(&sdk.Spec{
-				Name:        "user",
-				Description: "user id to pull subscribers from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "user",
+					Description: "user id to pull subscribers from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-subscriptions",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSubscriptions,
-			Spec: specs(&sdk.Spec{
-				Name:        "user",
-				Description: "user id to pull subscriptions from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "user",
+					Description: "user id to pull subscriptions from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 
 		// --- chat producers ---
@@ -146,23 +167,29 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-channels",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChannels,
-			Spec: specs(&sdk.Spec{
-				Name:        "query",
-				Description: "search query for open channels; empty yields trending channels",
-				Type:        sdk.TypeString,
-				Default:     "",
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "query",
+					Description: "search query for open channels; empty yields trending channels",
+					Type:        sdk.TypeString,
+					Default:     "",
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-history",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatHistory,
-			Spec: specs(&sdk.Spec{
-				Name:        "channel",
-				Description: "channel name to pull message history from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "channel",
+					Description: "channel name to pull message history from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				encodingSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-listen",
@@ -181,18 +208,22 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeInt,
 					Default:     0,
 				},
+				encodingSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-invites",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatInvites,
-			Spec: specs(&sdk.Spec{
-				Name:        "stop-after",
-				Description: "stop after n received invites; 0 listens until the process exits",
-				Type:        sdk.TypeInt,
-				Default:     0,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "stop-after",
+					Description: "stop after n received invites; 0 listens until the process exits",
+					Type:        sdk.TypeInt,
+					Default:     0,
+				},
+				encodingSpec(),
+			),
 		},
 
 		// --- transformers ---
@@ -200,17 +231,19 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-author",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: authorTransformer,
+			Spec: specs(encodingSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
+			Spec: specs(encodingSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-lookup-content",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: lookupContent,
-			Spec:               clientSpecs(),
+			Spec: append(clientSpecs(), encodingSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-lookup-user",
@@ -229,13 +262,14 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeBool,
 					Default:     false,
 				},
+				encodingSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-lookup-channel",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: lookupChannel,
-			Spec:               clientSpecs(),
+			Spec: append(clientSpecs(), encodingSpec()),
 		},
 	)
 }

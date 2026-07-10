@@ -3,10 +3,35 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/psyduck-etl/sdk"
 )
+
+// TestMain registers a tiny JSON codec factory so ifunny tests run without
+// a host binary. In production the psyduck host registers the real stdlib
+// codec chain; here we just need "json" to work end-to-end for the
+// codec-dependent transformers and producers. Anything else returns an error.
+func TestMain(m *testing.M) {
+	sdk.RegisterCodecs(func(spec string) (sdk.Codec, error) {
+		if spec != "json" {
+			return nil, fmt.Errorf("test codec factory: unknown spec %q", spec)
+		}
+		return jsonCodec{}, nil
+	})
+	os.Exit(m.Run())
+}
+
+type jsonCodec struct{}
+
+func (jsonCodec) Decode(b []byte) (any, error) {
+	var v any
+	err := json.Unmarshal(b, &v)
+	return v, err
+}
+func (jsonCodec) Encode(v any) ([]byte, error) { return json.Marshal(v) }
 
 // expectedResource describes what the assembly must advertise for a
 // resource: its kind and the specs it must expose.
@@ -16,24 +41,24 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed"}},
-	"ifunny-timeline":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
-	"ifunny-explore":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind"}},
-	"ifunny-comments":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-replies":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment"}},
-	"ifunny-smiles":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-republishers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-subscribers":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
-	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
-	"ifunny-channels":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query"}},
-	"ifunny-chat-history":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel"}},
-	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after"}},
-	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after"}},
-	"ifunny-author":         {sdk.TRANSFORMER, nil},
-	"ifunny-tags":           {sdk.TRANSFORMER, nil},
-	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
-	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
-	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
+	"ifunny-feed":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "encoding"}},
+	"ifunny-timeline":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
+	"ifunny-explore":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "encoding"}},
+	"ifunny-comments":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-replies":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "encoding"}},
+	"ifunny-smiles":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-republishers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-subscribers":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
+	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
+	"ifunny-channels":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "encoding"}},
+	"ifunny-chat-history":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
+	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
+	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
+	"ifunny-author":         {sdk.TRANSFORMER, []string{"encoding"}},
+	"ifunny-tags":           {sdk.TRANSFORMER, []string{"encoding"}},
+	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "encoding"}},
+	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
+	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "encoding"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -261,7 +286,7 @@ func TestLookup(t *testing.T) {
 	}
 
 	var gotID string
-	transform := lookup(func(id string) (any, error) {
+	transform := lookup(jsonCodec{}, func(id string) (any, error) {
 		gotID = id
 		return entity{ID: id, Name: "resolved"}, nil
 	})
@@ -298,7 +323,7 @@ func TestLookup(t *testing.T) {
 
 // A looker returning nil (e.g. a not-found lookup) drops the datum.
 func TestLookupNilDropsDatum(t *testing.T) {
-	transform := lookup(func(string) (any, error) {
+	transform := lookup(jsonCodec{}, func(string) (any, error) {
 		return nil, nil
 	})
 

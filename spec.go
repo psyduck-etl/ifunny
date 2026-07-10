@@ -80,3 +80,13 @@ func clientSpecs() []*sdk.Spec {
 func specs(extra ...*sdk.Spec) []*sdk.Spec {
 	return append(clientSpecs(), extra...)
 }
+
+// encodingSpec returns the shared encoding spec used by producers and transformers.
+func encodingSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "encoding",
+		Description: "encoding for output, e.g. json",
+		Type:        sdk.TypeString,
+		Default:     "json",
+	}
+}
