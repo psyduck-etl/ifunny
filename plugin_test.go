@@ -10,16 +10,25 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-// TestMain registers a tiny JSON codec factory so ifunny tests run without
-// a host binary. In production the psyduck host registers the real stdlib
-// codec chain; here we just need "json" to work end-to-end for the
-// codec-dependent transformers and producers. Anything else returns an error.
+// TestMain registers tiny codec factories so ifunny tests run without a
+// host binary. In production the psyduck host registers the real stdlib
+// codec chain; here we need:
+//
+//   - "json": end-to-end for the codec-dependent transformers/producers.
+//   - "string": the terminal-reference codec — its Decode returns a Go
+//     string of the input bytes, its Encode expects a string (anything
+//     else errors). The enrich transformers dispatch on this shape.
+//
+// Anything else returns an error.
 func TestMain(m *testing.M) {
 	sdk.RegisterCodecs(func(spec string) (sdk.Codec, error) {
-		if spec != "json" {
-			return nil, fmt.Errorf("test codec factory: unknown spec %q", spec)
+		switch spec {
+		case "json":
+			return jsonCodec{}, nil
+		case "string":
+			return stringCodec{}, nil
 		}
-		return jsonCodec{}, nil
+		return nil, fmt.Errorf("test codec factory: unknown spec %q", spec)
 	})
 	os.Exit(m.Run())
 }
@@ -33,6 +42,17 @@ func (jsonCodec) Decode(b []byte) (any, error) {
 }
 func (jsonCodec) Encode(v any) ([]byte, error) { return json.Marshal(v) }
 
+type stringCodec struct{}
+
+func (stringCodec) Decode(b []byte) (any, error) { return string(b), nil }
+func (stringCodec) Encode(v any) ([]byte, error) {
+	s, ok := v.(string)
+	if !ok {
+		return nil, fmt.Errorf("string codec: cannot encode %T", v)
+	}
+	return []byte(s), nil
+}
+
 // expectedResource describes what the assembly must advertise for a
 // resource: its kind and the specs it must expose.
 type expectedResource struct {
@@ -41,24 +61,24 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "encoding"}},
-	"ifunny-timeline":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
-	"ifunny-explore":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "encoding"}},
-	"ifunny-comments":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-replies":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "encoding"}},
-	"ifunny-smiles":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-republishers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
-	"ifunny-subscribers":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
-	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
-	"ifunny-channels":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "encoding"}},
-	"ifunny-chat-history":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
-	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
-	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
-	"ifunny-author":         {sdk.TRANSFORMER, []string{"encoding"}},
-	"ifunny-tags":           {sdk.TRANSFORMER, []string{"encoding"}},
-	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "encoding"}},
-	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
-	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "encoding"}},
+	"ifunny-feed":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "encoding"}},
+	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "encoding"}},
+	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "encoding"}},
+	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-replies":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "encoding"}},
+	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "encoding"}},
+	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
+	"ifunny-subscriptions": {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "encoding"}},
+	"ifunny-channels":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "encoding"}},
+	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "encoding"}},
+	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "encoding"}},
+	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "encoding"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "accept", "emit"}},
+	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -151,10 +171,11 @@ func TestExtractAuthor(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			author, ok, err := extractAuthor([]byte(tc.body))
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			var m map[string]any
+			if err := json.Unmarshal([]byte(tc.body), &m); err != nil {
+				t.Fatalf("prep unmarshal: %v", err)
 			}
+			author, ok := extractAuthor(m)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -169,174 +190,248 @@ func TestExtractAuthor(t *testing.T) {
 }
 
 // The chat event nests its author id under a "user" json key inside a
-// "user" object; extractAuthor must read that shape. This guards the
-// specific mapping ChatEvent uses.
+// "user" object; extractAuthor must read that shape.
 func TestExtractAuthorChatEventShape(t *testing.T) {
-	author, ok, err := extractAuthor([]byte(`{"user":{"user":"u9","nick":"dan"}}`))
-	if err != nil || !ok {
-		t.Fatalf("extractAuthor ok=%v err=%v", ok, err)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(`{"user":{"user":"u9","nick":"dan"}}`), &m); err != nil {
+		t.Fatalf("prep: %v", err)
+	}
+	author, ok := extractAuthor(m)
+	if !ok {
+		t.Fatalf("extractAuthor ok=false")
 	}
 	if author.ID != "u9" {
 		t.Errorf("id = %q, want u9", author.ID)
 	}
 }
 
-func TestAuthorTransformer(t *testing.T) {
-	transform, err := authorTransformer(nil)
-	if err != nil {
-		t.Fatalf("build transformer: %v", err)
-	}
+// --- runEnrich matrix coverage ------------------------------------------
+//
+// A fake enrichSpec + counters lets these tests walk every cell of the
+// accept/emit matrix without a live client. Each test is one cell.
 
-	// Test with an entity that has an author.
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 1)
-	errs := make(chan error, 1)
+// testEntity is the fake T that fakeSpec's fetchTarget returns.
+type testEntity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 
-	in <- []byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`)
-	close(in)
+// enrichCounters records how often resolveRef and fetchTarget fired,
+// so tests can pin down "how many ops" per matrix cell.
+type enrichCounters struct {
+	resolveCalls int
+	fetchCalls   int
+}
 
-	transform(context.Background(), in, out, errs)
-
-	result, ok := <-out
-	if !ok {
-		t.Fatal("expected out to be readable")
-	}
-	if _, ok := <-out; ok {
-		t.Fatal("expected out to be closed")
-	}
-
-	got := new(authorRef)
-	if err := json.Unmarshal(result, got); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
-	}
-	if got.ID != "u1" || got.Nick != "alice" {
-		t.Errorf("output = %+v, want id=u1 nick=alice", got)
-	}
-
-	// Test with an entity that has no author (should be dropped).
-	in2 := make(chan []byte, 1)
-	out2 := make(chan []byte, 1)
-	errs2 := make(chan error, 1)
-
-	in2 <- []byte(`{"id":"abc"}`)
-	close(in2)
-
-	transform(context.Background(), in2, out2, errs2)
-
-	if _, ok := <-out2; ok {
-		t.Errorf("expected no output for author-less entity, but got data")
+// fakeSpec builds an enrichSpec whose targetRef reads targetField off
+// the input map, whose resolveRef echoes the source ref through (like
+// a same-entity transformer's identity resolve), and whose fetchTarget
+// returns a copy of resolved with ID replaced by ref (or nil,nil when
+// resolved is nil, simulating not-found).
+func fakeSpec(name, targetField string, c *enrichCounters, resolved *testEntity) enrichSpec {
+	return enrichSpec{
+		name: name,
+		targetRef: func(m map[string]any) (string, bool) {
+			s, ok := m[targetField].(string)
+			return s, ok && s != ""
+		},
+		resolveRef: func(ref string) (string, error) {
+			c.resolveCalls++
+			return ref, nil
+		},
+		fetchTarget: func(ref string) (any, error) {
+			c.fetchCalls++
+			if resolved == nil {
+				return nil, nil
+			}
+			out := *resolved
+			out.ID = ref
+			return &out, nil
+		},
 	}
 }
 
-func TestTagsTransformer(t *testing.T) {
-	transform, err := tagsTransformer(nil)
-	if err != nil {
-		t.Fatalf("build transformer: %v", err)
-	}
+// sparse in + sparse out: resolveRef echoes the ref through; no fetch.
+// For a same-entity spec this is 0 API ops (resolveRef is trivial).
+func TestRunEnrichSparseIn_SparseOut(t *testing.T) {
+	c := &enrichCounters{}
+	spec := fakeSpec("test", "id", c, nil)
 
-	// Test with a post that has tags.
 	in := make(chan []byte, 1)
-	out := make(chan []byte, 1)
+	out := make(chan []byte, 4)
 	errs := make(chan error, 1)
 
-	in <- []byte(`{"id":"abc","tags":["funny","cats","meme"],"type":"pic"}`)
+	in <- []byte("xyz")
 	close(in)
 
-	transform(context.Background(), in, out, errs)
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, stringCodec{}, true, spec)
 
-	result, ok := <-out
-	if !ok {
-		t.Fatal("expected out to be readable")
+	var got [][]byte
+	for b := range out {
+		got = append(got, b)
 	}
-	if _, ok := <-out; ok {
-		t.Fatal("expected out to be closed")
+	if len(got) != 1 || string(got[0]) != "xyz" {
+		t.Errorf("out = %q, want [xyz]", got)
 	}
-
-	got := new(struct {
-		Tags []string `json:"tags"`
-	})
-	if err := json.Unmarshal(result, got); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
+	if c.resolveCalls != 1 {
+		t.Errorf("resolve = %d, want 1", c.resolveCalls)
 	}
-	if len(got.Tags) != 3 || got.Tags[0] != "funny" || got.Tags[2] != "meme" {
-		t.Errorf("tags = %v, want [funny cats meme]", got.Tags)
-	}
-
-	// A post with no tags is dropped.
-	for _, body := range []string{`{"id":"abc"}`, `{"id":"abc","tags":[]}`} {
-		in2 := make(chan []byte, 1)
-		out2 := make(chan []byte, 1)
-		errs2 := make(chan error, 1)
-
-		in2 <- []byte(body)
-		close(in2)
-
-		transform(context.Background(), in2, out2, errs2)
-
-		if _, ok := <-out2; ok {
-			t.Errorf("expected no output for %s, but got data", body)
-		}
+	if c.fetchCalls != 0 {
+		t.Errorf("fetch = %d, want 0 (sparse out never hydrates)", c.fetchCalls)
 	}
 }
 
-func TestLookup(t *testing.T) {
-	type entity struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-
-	var gotID string
-	transform := lookup(jsonCodec{}, func(id string) (any, error) {
-		gotID = id
-		return entity{ID: id, Name: "resolved"}, nil
-	})
+// sparse in + rich out: one fetch to hydrate the target.
+func TestRunEnrichSparseIn_RichOut(t *testing.T) {
+	c := &enrichCounters{}
+	spec := fakeSpec("test", "id", c, &testEntity{Name: "resolved"})
 
 	in := make(chan []byte, 1)
-	out := make(chan []byte, 1)
+	out := make(chan []byte, 4)
 	errs := make(chan error, 1)
 
-	in <- []byte(`{"id":"xyz","nick":"ignored"}`)
+	in <- []byte("xyz")
 	close(in)
 
-	transform(context.Background(), in, out, errs)
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, spec)
 
-	result, ok := <-out
-	if !ok {
-		t.Fatal("expected out to be readable")
-	}
-	if _, ok := <-out; ok {
-		t.Fatal("expected out to be closed")
-	}
-
-	if gotID != "xyz" {
-		t.Errorf("looker got id %q, want xyz", gotID)
-	}
-
-	got := new(entity)
-	if err := json.Unmarshal(result, got); err != nil {
+	got := new(testEntity)
+	b := <-out
+	if err := json.Unmarshal(b, got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Name != "resolved" {
-		t.Errorf("resolved name = %q, want resolved", got.Name)
+	if got.ID != "xyz" || got.Name != "resolved" {
+		t.Errorf("out = %+v, want id=xyz name=resolved", got)
+	}
+	if _, ok := <-out; ok {
+		t.Errorf("out not closed")
+	}
+	if c.fetchCalls != 1 {
+		t.Errorf("fetch = %d, want 1", c.fetchCalls)
 	}
 }
 
-// A looker returning nil (e.g. a not-found lookup) drops the datum.
-func TestLookupNilDropsDatum(t *testing.T) {
-	transform := lookup(jsonCodec{}, func(string) (any, error) {
-		return nil, nil
-	})
+// rich in + sparse out: 0 ops. Target ref is read from the map and
+// emitted directly; no resolve, no fetch.
+func TestRunEnrichRichIn_SparseOut(t *testing.T) {
+	c := &enrichCounters{}
+	spec := fakeSpec("test", "id", c, nil)
 
 	in := make(chan []byte, 1)
-	out := make(chan []byte, 1)
+	out := make(chan []byte, 4)
 	errs := make(chan error, 1)
 
-	in <- []byte(`{"id":"missing"}`)
+	in <- []byte(`{"id":"abc","name":"hydrated"}`)
 	close(in)
 
-	transform(context.Background(), in, out, errs)
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, spec)
+
+	b := <-out
+	if string(b) != "abc" {
+		t.Errorf("out = %q, want abc", string(b))
+	}
+	if c.resolveCalls != 0 || c.fetchCalls != 0 {
+		t.Errorf("no calls expected; got resolve=%d fetch=%d", c.resolveCalls, c.fetchCalls)
+	}
+}
+
+// rich in + rich out: fetches T fresh. Rich emission is always a
+// hydrator — the input map is never assumed *fully* rich, so we
+// re-fetch even when the input already carries a stale name.
+func TestRunEnrichRichIn_RichOut(t *testing.T) {
+	c := &enrichCounters{}
+	spec := fakeSpec("test", "id", c, &testEntity{Name: "fresh"})
+
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 4)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"abc","name":"stale-cache"}`)
+	close(in)
+
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, spec)
+
+	got := new(testEntity)
+	if err := json.Unmarshal(<-out, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Name != "fresh" {
+		t.Errorf("out.name = %q, want fresh (rich→rich must refetch)", got.Name)
+	}
+	if c.fetchCalls != 1 {
+		t.Errorf("fetch = %d, want 1", c.fetchCalls)
+	}
+}
+
+// Partial rich (map missing the transformer's target field): fall back
+// to resolveRef via the map's "id" (source-ref) field. This is the
+// "trusted only insofar as we find it useful" case.
+func TestRunEnrichRichMissingTargetFallsBack(t *testing.T) {
+	c := &enrichCounters{}
+	// Target field is "author-id" but the map has only "id" — so
+	// targetRef misses and we fall through to resolveRef("src-id").
+	spec := fakeSpec("test", "author-id", c, nil)
+
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 4)
+	errs := make(chan error, 1)
+
+	in <- []byte(`{"id":"src-id","name":"no-target"}`)
+	close(in)
+
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, stringCodec{}, true, spec)
+
+	b := <-out
+	if string(b) != "src-id" {
+		t.Errorf("out = %q, want src-id (via fallback)", string(b))
+	}
+	if c.resolveCalls != 1 {
+		t.Errorf("resolve = %d, want 1 (fallback)", c.resolveCalls)
+	}
+}
+
+// A fetchTarget that returns (nil, nil) — the not-found convention —
+// drops the record.
+func TestRunEnrichNotFoundDrops(t *testing.T) {
+	c := &enrichCounters{}
+	// resolved == nil → fetchTarget returns (nil, nil).
+	spec := fakeSpec("test", "id", c, nil)
+
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 4)
+	errs := make(chan error, 1)
+
+	in <- []byte("missing")
+	close(in)
+
+	runEnrich(context.Background(), in, out, errs, stringCodec{}, jsonCodec{}, false, spec)
 
 	if _, ok := <-out; ok {
-		t.Errorf("expected no output for nil lookup, but got data")
+		t.Errorf("expected no output on not-found")
+	}
+}
+
+// Rich input with neither the target ref nor an "id" fallback field
+// → per-record error.
+func TestRunEnrichUnusableRichErrors(t *testing.T) {
+	c := &enrichCounters{}
+	spec := fakeSpec("test", "target-key", c, nil)
+
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 4)
+	errs := make(chan error, 4)
+
+	in <- []byte(`{"other":"foo"}`)
+	close(in)
+
+	runEnrich(context.Background(), in, out, errs, jsonCodec{}, jsonCodec{}, false, spec)
+
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Errorf("nil error")
+		}
+	default:
+		t.Errorf("expected an error on unusable rich input")
 	}
 }

@@ -231,24 +231,24 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-author",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: authorTransformer,
-			Spec: specs(encodingSpec()),
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
-			Spec: specs(encodingSpec()),
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-content",
+			Name:               "ifunny-content",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupContent,
-			Spec: append(clientSpecs(), encodingSpec()),
+			ProvideTransformer: contentTransformer,
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-user",
+			Name:               "ifunny-user",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupUser,
+			ProvideTransformer: userTransformer,
 			Spec: specs(
 				&sdk.Spec{
 					Name:        "by-id",
@@ -262,14 +262,15 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeBool,
 					Default:     false,
 				},
-				encodingSpec(),
+				acceptSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-channel",
+			Name:               "ifunny-channel",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupChannel,
-			Spec: append(clientSpecs(), encodingSpec()),
+			ProvideTransformer: channelTransformer,
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 	)
 }

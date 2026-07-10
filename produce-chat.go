@@ -137,9 +137,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			if ctx.Err() == nil {
-				errs <- err
-			}
+			sendErr(ctx, errs, err)
 			return
 		}
 
@@ -158,9 +156,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			case event := <-events:
 				b, err := codec.Encode(event)
 				if err != nil {
-					if ctx.Err() == nil {
-						errs <- err
-					}
+					sendErr(ctx, errs, err)
 					return
 				}
 				select {
@@ -252,9 +248,7 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			return nil
 		})
 		if err != nil {
-			if ctx.Err() == nil {
-				errs <- err
-			}
+			sendErr(ctx, errs, err)
 			return
 		}
 
@@ -273,9 +267,7 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			case channel := <-invites:
 				b, err := codec.Encode(channel)
 				if err != nil {
-					if ctx.Err() == nil {
-						errs <- err
-					}
+					sendErr(ctx, errs, err)
 					return
 				}
 				select {

@@ -81,11 +81,42 @@ func specs(extra ...*sdk.Spec) []*sdk.Spec {
 	return append(clientSpecs(), extra...)
 }
 
-// encodingSpec returns the shared encoding spec used by producers and transformers.
+// encodingSpec returns the shared encoding spec used by producers.
+// Producers only emit — there is no "accept" side — so a single field
+// suffices. Transformers use acceptSpec / emitSpec instead.
 func encodingSpec() *sdk.Spec {
 	return &sdk.Spec{
 		Name:        "encoding",
 		Description: "encoding for output, e.g. json",
+		Type:        sdk.TypeString,
+		Default:     "json",
+	}
+}
+
+// acceptSpec is a transformer's input encoding. It decides the front
+// half of the matrix: "string" means the input is a bare terminal ref
+// (sparse — a fetch will be needed to obtain any intermediates);
+// "json" means the input is an object (rich — we trust it insofar as
+// we find it useful, falling back to a fetch keyed by the input's own
+// terminal ref when the field we need isn't present).
+func acceptSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "accept",
+		Description: "encoding of records the transformer accepts on input, e.g. json (a rich object) or string (a bare terminal reference)",
+		Type:        sdk.TypeString,
+		Default:     "json",
+	}
+}
+
+// emitSpec is a transformer's output encoding. It decides the back
+// half: "string" means emit the target's terminal ref (no hydration —
+// a bare id or name); "json" means emit the fully-hydrated target
+// (always fetched — an incoming object is never trusted as _fully_
+// rich for emission).
+func emitSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "emit",
+		Description: "encoding of records the transformer emits, e.g. json (a fully-hydrated target) or string (the target's bare terminal reference)",
 		Type:        sdk.TypeString,
 		Default:     "json",
 	}

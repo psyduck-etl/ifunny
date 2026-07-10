@@ -20,9 +20,7 @@ func produceIter[T any](ctx context.Context, iter <-chan ifunny.Result[*T], send
 
 	for r := range iter {
 		if r.Err != nil {
-			if ctx.Err() == nil {
-				errs <- r.Err
-			}
+			sendErr(ctx, errs, r.Err)
 			return
 		}
 
@@ -32,9 +30,7 @@ func produceIter[T any](ctx context.Context, iter <-chan ifunny.Result[*T], send
 
 		b, err := codec.Encode(r.V)
 		if err != nil {
-			if ctx.Err() == nil {
-				errs <- err
-			}
+			sendErr(ctx, errs, err)
 			return
 		}
 
@@ -552,18 +548,14 @@ func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
 
 			channels, err := client.GetChannels(compose.ChatsTrending)
 			if err != nil {
-				if ctx.Err() == nil {
-					errs <- err
-				}
+				sendErr(ctx, errs, err)
 				return
 			}
 
 			for _, channel := range channels {
 				b, err := codec.Encode(channel)
 				if err != nil {
-					if ctx.Err() == nil {
-						errs <- err
-					}
+					sendErr(ctx, errs, err)
 					return
 				}
 				select {

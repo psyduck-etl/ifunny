@@ -30,19 +30,41 @@
 //
 // Transformers:
 //
-//   - ifunny-author         — [authorTransformer]
-//   - ifunny-tags           — [tagsTransformer]
-//   - ifunny-lookup-content — [lookupContent]
-//   - ifunny-lookup-user    — [lookupUser]
-//   - ifunny-lookup-channel — [lookupChannel]
+//   - ifunny-author  — [authorTransformer]
+//   - ifunny-tags    — [tagsTransformer]
+//   - ifunny-content — [contentTransformer]
+//   - ifunny-user    — [userTransformer]
+//   - ifunny-channel — [channelTransformer]
 //
 // # Authentication
 //
-// Every API-backed resource takes a user-agent block plus exactly one of
-// auth-basic (anonymous — a literal primed token, "generate", or
-// "generate-cache") or auth-bearer (logged-in user's OAuth token; required
-// for the chat resources). See [authConfig] and [userAgentConfig] for the
-// full surface.
+// Every API-backed resource — producers and transformers alike — takes a
+// user-agent block plus exactly one of auth-basic (anonymous — a literal
+// primed token, "generate", or "generate-cache") or auth-bearer (logged-in
+// user's OAuth token; required for the chat resources). See [authConfig]
+// and [userAgentConfig] for the full surface.
+//
+// # Transformer accept / emit matrix
+//
+// Every transformer takes two encoding fields (default "json"):
+//
+//   - accept — encoding of records the transformer decodes on input.
+//     "json" is a rich object trusted only insofar as we find it useful:
+//     if the field we need is present we use it, otherwise we fall back
+//     to fetching the source entity by its own terminal ref. "string" is
+//     a bare terminal ref of the source; a fetch is always required to
+//     obtain any intermediates.
+//   - emit — encoding of records the transformer encodes on output.
+//     "json" is a fully-hydrated target — always fetched fresh; incoming
+//     rich objects are never re-emitted verbatim. "string" is the
+//     target's terminal ref, no hydration.
+//
+// The accept×emit matrix is solved at bind time. Bind-time errors:
+// ifunny-tags with emit = "string" (no terminal ref for a tag list), and
+// same-entity identity resources with accept = emit = "string"
+// (ifunny-content, ifunny-channel, ifunny-user by-id — nothing to do).
+// ifunny-user by-nick sparse→sparse is *not* an error because nick → id
+// is a real fetch.
 //
 // # ELI5 example
 //
@@ -60,7 +82,13 @@
 //	  stop-after = 20
 //	}
 //
-//	transform "ifunny-author" "author" {}
+//	transform "ifunny-author" "author" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	}
 //
 //	consume "trash" "trash" {}
 //

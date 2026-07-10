@@ -98,9 +98,10 @@ users, or rooms. From there every step points you at more entities:
 Every *person* you turn up is a fresh starting point, so the graph keeps
 feeding itself: posts → people → their posts → their commenters → … The
 `ifunny-author` step is the glue — it turns a post, comment, or chat message
-into the `{id, nick}` of the person behind it. The `ifunny-lookup-*` steps do
-the opposite of discovery: they swap a lightweight reference (just an id or a
-channel name) for the full object when you need all of its fields.
+into a user reference (an `{id, nick}` json object, or a bare id string). The
+`ifunny-content` / `ifunny-user` / `ifunny-channel` steps do the opposite of
+discovery: they swap a lightweight reference (just an id or a channel name)
+for the full object when you need all of its fields.
 
 ### The map
 
@@ -192,24 +193,51 @@ Notes:
 
 ## Transformers
 
-| Resource | Options | In → Out |
+Every transformer takes the shared auth surface (see
+[Authentication](#authentication)) plus two encoding fields:
+
+| Field | Default | Meaning |
 | --- | --- | --- |
-| `ifunny-author` | — | Content / Comment / ChatEvent → `{id, nick}` |
-| `ifunny-tags` | — | Content → `{"tags": [...]}` |
-| `ifunny-lookup-content` | — | `{id}` → full Content |
-| `ifunny-lookup-user` | `by-id`, `by-nick` (mutex) | `{id}` or `{nick}` → full User |
-| `ifunny-lookup-channel` | — | `{name}` → full ChatChannel |
+| `accept` | `"json"` | Encoding of records the transformer *decodes*. `"json"` = a rich object trusted only insofar as we find it useful (missing fields fall back to a fetch by the source's own terminal ref). `"string"` = a bare terminal ref of the source; a fetch is always required to obtain intermediates. |
+| `emit` | `"json"` | Encoding of records the transformer *emits*. `"json"` = the fully-hydrated target — always fetched fresh; incoming rich objects are never re-emitted verbatim. `"string"` = the target's terminal ref, no hydration. |
+
+| Resource | Options (beyond accept/emit) | S → T |
+| --- | --- | --- |
+| `ifunny-author` | — | Content / Comment / ChatEvent → User |
+| `ifunny-tags` | — | Content → `{"tags": [...]}` (json emit only) |
+| `ifunny-content` | — | Content ref → Content |
+| `ifunny-user` | `by-id`, `by-nick` (mutex) | User ref → User |
+| `ifunny-channel` | — | Channel ref → ChatChannel |
+
+Op count per accept×emit cell (S = source entity, T = target entity):
+
+| accept → emit | sparse (`string`) | rich (`json`) |
+| --- | --- | --- |
+| **sparse** (`string`) | S≠T: 1 fetch (source, extract target ref). S=T: **bind error** — no-op (except `ifunny-user` by-nick, which is a real nick→id fetch). | S≠T: 1 fetch (source) + 1 fetch (target). S=T: 1 fetch (target). |
+| **rich** (`json`) | 0 fetches on the fast path (target ref present); 1 fetch on fallback (needed field missing → fetch source by its own id, retry extraction). | 1 fetch (always — target is hydrated fresh) + 0 or 1 fallback fetch on missed extraction. |
+
+Bind-time errors:
+
+- `ifunny-tags` with `emit = "string"` — a tag list has no terminal ref.
+- `ifunny-content`, `ifunny-channel`, and `ifunny-user` (`by-id`) with
+  `accept = emit = "string"` — identity, zero ops. `ifunny-user` `by-nick`
+  sparse → sparse is fine (nick → id is a real fetch).
+
+Runtime behavior notes:
 
 - **`ifunny-author`** extracts the author reference from any entity that has
-  one — content (`creator`), comments and chat events (`user`) — emitting the
-  `{id, nick}` seed the user-oriented producers consume. Entities with no
-  author are dropped from the pipeline.
-- **`ifunny-tags`** lifts a post's tag list out of a Content record as
-  `{"tags": [...]}`. Posts with no tags are dropped. See
+  one — content (`creator`), comments and chat events (`user`). Sparse emit
+  drops the nick (bare user id); rich emit fetches the full User. Entities
+  with no author are dropped from the pipeline.
+- **`ifunny-tags`** lifts a post's tag list as `{"tags": [...]}`. Posts with
+  no tags are dropped. Missing `tags` key on a rich input triggers a
+  content-by-id fallback fetch. See
   [Tag aggregation](#tag-aggregation) for how this feeds a tag census.
-- **`ifunny-lookup-*`** hydrate a lightweight reference into the full entity.
-  A not-found user (for `ifunny-lookup-user`) drops the datum rather than
-  failing the pipeline.
+- **`ifunny-content` / `ifunny-user` / `ifunny-channel`** hydrate (or
+  extract) a lightweight reference. A not-found target drops the datum
+  rather than failing the pipeline.
+- All five transformers require auth — the same
+  `auth-basic` / `auth-bearer` + `user-agent` surface producers take.
 
 ## Chaining across pipelines
 
