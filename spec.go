@@ -23,10 +23,12 @@ import "github.com/psyduck-etl/sdk"
 //
 // Rate limiting (per-minute) and item cutoffs (stop-after) are host-owned
 // BlockMeta attributes under the SDK v0.5.2 plugin API — the host decodes
-// and enforces them out of band, so resources here never declare them. The
-// one exception is ifunny-chat-listen (and ifunny-chat-invites), which
-// declare their own stop-after to terminate their websocket subscription
-// cleanly (see produce-chat.go).
+// and enforces them out of band, so resources here never declare them.
+// This includes the live-subscription chat resources (ifunny-chat-listen,
+// ifunny-chat-invites): the host's flow.Producer wrapper cancels their
+// ctx at the cutoff and their loops unsubscribe cleanly via ctx.Done.
+// Requires a psyduck host with gastrodon/psyduck#29 (flow: cancel inner
+// ctx on cutoff).
 func clientSpecs() []*sdk.Spec {
 	return []*sdk.Spec{
 		{

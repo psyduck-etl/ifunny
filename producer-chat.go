@@ -62,23 +62,19 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 	}, nil
 }
 
-// chatListenConfig configures ifunny-chat-listen. StopAfter bounds the
-// live subscription (0 = listen until the process exits); the field lives
-// on the resource rather than as a host-owned attribute because the WAMP
-// callback pattern needs to know the bound to tear its bridge down.
+// chatListenConfig configures ifunny-chat-listen.
 type chatListenConfig struct {
 	authConfig
-	Channel   string `psy:"channel"`
-	StopAfter int    `psy:"stop-after"`
+	Channel string `psy:"channel"`
 	emitConfig
 }
 
 // produceChatListen builds the ifunny-chat-listen producer. It streams
 // live events from a public channel, emitting each ChatEvent via codec
-// (default "json"). A live subscription has no natural end — the SDK
-// Producer signature carries no cancellation channel — so the resource
-// declares its own stop-after to bound the listen and unsubscribe cleanly.
-// StopAfter of 0 listens until the process exits.
+// (default "json"). A live subscription has no natural end, so bound the
+// run with the host-owned stop-after BlockMeta — the host's flow.Producer
+// wrapper cancels ctx at the cutoff and the producer unsubscribes cleanly
+// via ctx.Done.
 //
 // OnChannelEvent delivers events on the websocket's goroutine via a
 // callback. We bridge those onto an internal channel and encode them on
@@ -96,9 +92,8 @@ type chatListenConfig struct {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
-//	  channel    = "chat.some-channel-name"
-//	  emit       = "json"
-//	  stop-after = 100
+//	  channel = "chat.some-channel-name"
+//	  emit    = "json"
 //	}
 func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 	config := &chatListenConfig{emitConfig: emitConfig{Emit: "json"}}
@@ -143,7 +138,6 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			unsubscribe()
 		}()
 
-		count := 0
 		for {
 			select {
 			case event := <-events:
@@ -155,11 +149,6 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 				select {
 				case send <- b:
 				case <-ctx.Done():
-					return
-				}
-
-				count++
-				if config.StopAfter > 0 && count >= config.StopAfter {
 					return
 				}
 			case <-done:
@@ -176,7 +165,6 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 // scoped to the authenticated user, not to a specific channel.
 type invitesConfig struct {
 	authConfig
-	StopAfter int `psy:"stop-after"`
 	emitConfig
 }
 
@@ -185,8 +173,7 @@ type invitesConfig struct {
 // ChatChannel entity encoded via codec (default "json") — the same shape
 // ifunny-channels emits, so it chains straight into ifunny-chat-history or
 // ifunny-chat-listen. Like ifunny-chat-listen, the subscription has no
-// natural end, so this resource declares its own stop-after (0 = listen
-// until process exits).
+// natural end; bound the run with the host-owned stop-after BlockMeta.
 //
 // Unlike ifunny-chat-listen this is not a per-channel subscription — the
 // underlying WAMP topic delivers every invite the current user gets.
@@ -203,8 +190,7 @@ type invitesConfig struct {
 //	    device         = "android"
 //	    device-version = "14"
 //	  }
-//	  emit     = "json"
-//	  stop-after = 10
+//	  emit = "json"
 //	}
 func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 	config := &invitesConfig{emitConfig: emitConfig{Emit: "json"}}
@@ -249,7 +235,6 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			unsubscribe()
 		}()
 
-		count := 0
 		for {
 			select {
 			case channel := <-invites:
@@ -261,11 +246,6 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 				select {
 				case send <- b:
 				case <-ctx.Done():
-					return
-				}
-
-				count++
-				if config.StopAfter > 0 && count >= config.StopAfter {
 					return
 				}
 			case <-done:

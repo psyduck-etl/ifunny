@@ -76,9 +76,12 @@ producers and lookups but **not** the chat resources.
 
 `per-minute` and `stop-after` are **host-owned** block attributes under SDK
 v0.5.2 — set them on any producer or consumer block and the host enforces
-them; resources here do not declare them. The one exception is
-`ifunny-chat-listen`, which declares its own `stop-after` to tear down its
-live websocket subscription cleanly (a live subscription has no natural end).
+them; resources here do not declare them. This includes the live-subscription
+chat resources (`ifunny-chat-listen`, `ifunny-chat-invites`): the host's
+`flow.Producer` wrapper cancels their ctx at the cutoff and the loops
+unsubscribe cleanly via `ctx.Done`. Requires a psyduck host with
+[gastrodon/psyduck#29](https://github.com/gastrodon/psyduck/pull/29) — older
+hosts leave the websocket pinned open past the cutoff.
 
 ## The discovery graph
 
@@ -167,8 +170,8 @@ options (see [Authentication](#authentication)) and `emit`.
 | `ifunny-subscriptions` | `user` | User | `User.id` |
 | `ifunny-channels` | `query` | ChatChannel | — (seed) |
 | `ifunny-chat-history` | `channel` | ChatEvent | `ChatChannel.name` |
-| `ifunny-chat-listen` | `channel`, `stop-after` | ChatEvent | `ChatChannel.name` |
-| `ifunny-chat-invites` | `stop-after` | ChatChannel | — (seed; `auth-bearer` only) |
+| `ifunny-chat-listen` | `channel` | ChatEvent | `ChatChannel.name` |
+| `ifunny-chat-invites` | — | ChatChannel | — (seed; `auth-bearer` only) |
 
 Notes:
 
@@ -185,12 +188,11 @@ Notes:
 - **`ifunny-channels`** with an empty `query` (the default) yields trending
   public channels; a non-empty `query` searches open channels.
 - **`ifunny-chat-history`** backfills a channel's message history over the
-  chat websocket. **`ifunny-chat-listen`** streams live events; set its
-  `stop-after` to bound collection (0 listens until the process exits).
+  chat websocket. **`ifunny-chat-listen`** streams live events; set the
+  block-level `stop-after` to bound collection.
 - **`ifunny-chat-invites`** streams `ChatChannel`s the logged-in user is
   invited to. Requires `auth-bearer` (anonymous clients receive no
-  invites); shares `ifunny-chat-listen`'s locally-declared `stop-after`
-  semantics for the same reason (no natural end to a live subscription).
+  invites); bound the run with block-level `stop-after`.
 
 ## Transformers
 

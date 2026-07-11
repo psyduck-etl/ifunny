@@ -202,12 +202,6 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				&sdk.Spec{
-					Name:        "stop-after",
-					Description: "stop after n live events; 0 listens until the process exits",
-					Type:        sdk.TypeInt,
-					Default:     0,
-				},
 				emitSpec(),
 			),
 		},
@@ -215,15 +209,7 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-chat-invites",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatInvites,
-			Spec: specs(
-				&sdk.Spec{
-					Name:        "stop-after",
-					Description: "stop after n received invites; 0 listens until the process exits",
-					Type:        sdk.TypeInt,
-					Default:     0,
-				},
-				emitSpec(),
-			),
+			Spec:            specs(emitSpec()),
 		},
 
 		// --- transformers ---
