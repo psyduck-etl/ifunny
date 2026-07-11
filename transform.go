@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
@@ -32,7 +31,7 @@ type tagsEnvelope struct {
 //
 // It reads the already-decoded map rather than raw bytes so runEnrich
 // (which decodes once via the accept codec) doesn't re-parse. A missing
-// author returns (authorRef{}, false, nil).
+// author returns (authorRef{}, false).
 func extractAuthor(m map[string]any) (authorRef, bool) {
 	for _, key := range []string{"creator", "user"} {
 		nested, ok := m[key].(map[string]any)
@@ -70,7 +69,7 @@ func parseUserBy(v, resource string) (byNick bool, err error) {
 
 // enrichSpec is the per-transformer data table runEnrich walks. Each
 // resource (author / tags / content / user / channel) supplies its own,
-// and runEnrich holds the shared channel-loop + matrix dispatch.
+// and runEnrich holds the shared per-record matrix dispatch.
 //
 // The matrix (per record): input encoding {sparse, rich} × output
 // encoding {sparse, rich} = 4 combinations. Front half = obtain the
@@ -100,17 +99,22 @@ type enrichSpec struct {
 	fetchTarget func(targetRef string) (any, error)
 }
 
-// resolveOne is the per-record body of the resolve stage. It decodes a
-// record via accept and returns T's terminal ref (or "" to drop). The
-// cont return controls the outer loop: false means the caller should
-// stop (context cancelled during error send); true means continue —
-// either with a real ref, or with "" for a per-record drop / delivered
-// error.
-func resolveOne(ctx context.Context, data []byte, accept *acceptConfig, spec enrichSpec, errs chan<- error) (ref string, cont bool) {
+// runEnrich is the shared per-record body walked by the five enrich
+// transformers. Given a decoded input (accept side), it obtains the
+// target's terminal ref, then either emits the ref (sparse out) or
+// fetches T and emits that (rich out). Returns (nil, nil) to drop a
+// record (not-found, empty rich author, per-record miss without
+// fallback), and (data, nil) to emit.
+//
+// Errors are returned; the SDK per-record transformer contract feeds
+// them upstream, so no errs channel is needed.
+func runEnrich(data []byte, accept *acceptConfig, emit *emitConfig, spec enrichSpec) ([]byte, error) {
 	decoded, err := accept.Decode(data)
 	if err != nil {
-		return "", sendErr(ctx, errs, err)
+		return nil, err
 	}
+
+	var ref string
 	switch v := decoded.(type) {
 	case string:
 		// Sparse in: the input is S's terminal ref. resolveRef
@@ -118,130 +122,47 @@ func resolveOne(ctx context.Context, data []byte, accept *acceptConfig, spec enr
 		// cross-entity ones (e.g. author reads content → creator.id).
 		r, err := spec.resolveRef(v)
 		if err != nil {
-			return "", sendErr(ctx, errs, err)
+			return nil, err
 		}
-		return r, true
+		if r == "" {
+			return nil, nil // source not found → drop
+		}
+		ref = r
 	case map[string]any:
 		// Rich in fast path: try to extract T's ref from the map.
 		if r, ok := spec.targetRef(v); ok {
-			return r, true
+			ref = r
+			break
 		}
 		// Rich in fallback: use the source's own id to fetch S
 		// and re-extract T's ref from the authoritative response.
 		sourceRef, ok := v["id"].(string)
 		if !ok || sourceRef == "" {
-			return "", sendErr(ctx, errs, fmt.Errorf("%s: rich input missing target and cannot fall back (no id field)", spec.name))
+			return nil, fmt.Errorf("%s: rich input missing target and cannot fall back (no id field)", spec.name)
 		}
 		r, err := spec.resolveRef(sourceRef)
 		if err != nil {
-			return "", sendErr(ctx, errs, err)
+			return nil, err
 		}
-		return r, true
+		if r == "" {
+			return nil, nil // source not found → drop
+		}
+		ref = r
 	default:
-		return "", sendErr(ctx, errs, fmt.Errorf("%s: cannot dispatch input of type %T", spec.name, decoded))
+		return nil, fmt.Errorf("%s: cannot dispatch input of type %T", spec.name, decoded)
 	}
-}
 
-// emitOne is the per-record body of the emit stage. Sparse-out encodes
-// the ref itself; rich-out fetches T and encodes it. A nil target from
-// fetchTarget signals not-found — returned as (nil, true) so the caller
-// drops the record and keeps looping.
-func emitOne(ctx context.Context, ref string, spec enrichSpec, emit *emitConfig, errs chan<- error) (b []byte, cont bool) {
 	if emit.sparse() {
-		encoded, err := emit.Encode(ref)
-		if err != nil {
-			return nil, sendErr(ctx, errs, err)
-		}
-		return encoded, true
+		return emit.Encode(ref)
 	}
 	target, err := spec.fetchTarget(ref)
 	if err != nil {
-		return nil, sendErr(ctx, errs, err)
+		return nil, err
 	}
 	if target == nil {
-		return nil, true // drop
+		return nil, nil // not found → drop
 	}
-	encoded, err := emit.Encode(target)
-	if err != nil {
-		return nil, sendErr(ctx, errs, err)
-	}
-	return encoded, true
-}
-
-// runEnrich is a two-stage pipeline. Stage A (spawned goroutine) drains
-// in, calls resolveOne per record, and pushes refs onto an internal
-// channel of the caller-configured buffer size. Stage B (runs in the
-// transformer's own goroutine so runEnrich returns after out is closed)
-// pulls refs off, calls emitOne, and writes to out.
-//
-// Ordering is preserved: stage A processes in order and pushes in order;
-// stage B pulls in order and pushes in order.
-//
-// Concurrency win: on cells where both halves fetch (author sparse→rich,
-// or user by-nick sparse→rich), the two fetches for consecutive records
-// overlap — up to buffer+1 records can be simultaneously in flight
-// across the two stages.
-//
-// Shutdown: in closes → stage A closes refs → stage B drains → stage B
-// closes out. ctx cancels either stage independently; both stages
-// ctx-select on every read and write, so neither can wedge.
-func runEnrich(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error, accept *acceptConfig, emit *emitConfig, buffer int, spec enrichSpec) {
-	if buffer < 0 {
-		buffer = 0
-	}
-	refs := make(chan string, buffer)
-
-	// Stage A: decode + resolve. Owns closing refs.
-	go func() {
-		defer close(refs)
-		for {
-			select {
-			case data, ok := <-in:
-				if !ok {
-					return
-				}
-				ref, cont := resolveOne(ctx, data, accept, spec, errs)
-				if !cont {
-					return
-				}
-				if ref == "" {
-					continue // drop / delivered error
-				}
-				select {
-				case refs <- ref:
-				case <-ctx.Done():
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Stage B: fetch + encode. Owns closing out.
-	defer close(out)
-	for {
-		select {
-		case ref, ok := <-refs:
-			if !ok {
-				return
-			}
-			b, cont := emitOne(ctx, ref, spec, emit, errs)
-			if !cont {
-				return
-			}
-			if b == nil {
-				continue // drop / delivered error
-			}
-			select {
-			case out <- b:
-			case <-ctx.Done():
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
+	return emit.Encode(target)
 }
 
 // authorTransformer builds the ifunny-author transformer. It maps a
@@ -284,7 +205,6 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		acceptConfig
 		emitConfig
 		EmitBy string `psy:"emit-by"`
-		Buffer int    `psy:"buffer"`
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
@@ -311,18 +231,12 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	buffer := config.Buffer
-
-	// pickCreatorField extracts creator.id or creator.nick per emit-by
-	// from the fetched Content. Empty string means the Content lacks
-	// the chosen axis (e.g. a nick that wasn't in the response).
 	pickCreatorField := func(c *ifunny.Content) string {
 		if byNick {
 			return c.Creator.Nick
 		}
 		return c.Creator.ID
 	}
-	// pickAuthorRef extracts the map's creator/user field per emit-by.
 	pickAuthorRef := func(a authorRef) string {
 		if byNick {
 			return a.Nick
@@ -340,10 +254,6 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			ref := pickAuthorRef(author)
 			return ref, ref != ""
 		},
-		// sparse-in / rich-in-miss: fetch the source content and
-		// pluck creator.<emit-by> off it. The Content struct
-		// populates Creator.ID on every hydrated response;
-		// Creator.Nick is populated on non-anonymous authors.
 		resolveRef: func(contentID string) (string, error) {
 			content, err := client.GetContent(contentID)
 			if err != nil {
@@ -370,8 +280,8 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		},
 	}
 
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
+	return func(data []byte) ([]byte, error) {
+		return runEnrich(data, &config.acceptConfig, &config.emitConfig, spec)
 	}, nil
 }
 
@@ -408,7 +318,6 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		acceptConfig
 		emitConfig
-		Buffer int `psy:"buffer"`
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
@@ -433,16 +342,6 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	buffer := config.Buffer
-	if buffer < 0 {
-		buffer = 0
-	}
-
-	// tags doesn't fit runEnrich (no terminal target ref; the output
-	// is an aggregation rather than an entity), but it still fits the
-	// two-stage pipe shape: stage A decodes + extracts-or-fetches the
-	// tag list, stage B encodes the envelope. The inter-stage channel
-	// carries []string instead of runEnrich's string.
 	fetchTags := func(contentID string) ([]string, error) {
 		content, err := client.GetContent(contentID)
 		if err != nil {
@@ -454,24 +353,21 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return content.Tags, nil
 	}
 
-	// resolveTags is stage A's per-record body. Returns nil tags for a
-	// drop; cont=false means bail.
-	resolveTags := func(ctx context.Context, data []byte, errs chan<- error) (tags []string, cont bool) {
+	return func(data []byte) ([]byte, error) {
 		decoded, err := config.acceptConfig.Decode(data)
 		if err != nil {
-			return nil, sendErr(ctx, errs, err)
+			return nil, err
 		}
+		var tags []string
 		switch v := decoded.(type) {
 		case string:
 			t, err := fetchTags(v)
 			if err != nil {
-				return nil, sendErr(ctx, errs, err)
+				return nil, err
 			}
-			return t, true
+			tags = t
 		case map[string]any:
 			if raw, ok := v["tags"]; ok {
-				// Rich input carries a tag list — trust
-				// it (even empty, which drops).
 				list, _ := raw.([]any)
 				out := make([]string, 0, len(list))
 				for _, t := range list {
@@ -479,77 +375,26 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 						out = append(out, s)
 					}
 				}
-				return out, true
+				tags = out
+				break
 			}
-			// Rich but missing "tags": fall back by content id.
 			contentID, ok := v["id"].(string)
 			if !ok || contentID == "" {
-				return nil, sendErr(ctx, errs, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)"))
+				return nil, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)")
 			}
 			t, err := fetchTags(contentID)
 			if err != nil {
-				return nil, sendErr(ctx, errs, err)
+				return nil, err
 			}
-			return t, true
+			tags = t
 		default:
-			return nil, sendErr(ctx, errs, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded))
+			return nil, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded)
 		}
-	}
 
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		tagsCh := make(chan []string, buffer)
-
-		// Stage A: decode + extract-or-fetch. Owns closing tagsCh.
-		go func() {
-			defer close(tagsCh)
-			for {
-				select {
-				case data, ok := <-in:
-					if !ok {
-						return
-					}
-					tags, cont := resolveTags(ctx, data, errs)
-					if !cont {
-						return
-					}
-					if len(tags) == 0 {
-						continue // drop / delivered error
-					}
-					select {
-					case tagsCh <- tags:
-					case <-ctx.Done():
-						return
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-
-		// Stage B: encode. Owns closing out.
-		defer close(out)
-		for {
-			select {
-			case tags, ok := <-tagsCh:
-				if !ok {
-					return
-				}
-				b, err := config.emitConfig.Encode(tagsEnvelope{Tags: tags})
-				if err != nil {
-					if !sendErr(ctx, errs, err) {
-						return
-					}
-					continue
-				}
-				select {
-				case out <- b:
-				case <-ctx.Done():
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
+		if len(tags) == 0 {
+			return nil, nil // drop
 		}
+		return config.emitConfig.Encode(tagsEnvelope{Tags: tags})
 	}, nil
 }
 
@@ -581,7 +426,6 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		acceptConfig
 		emitConfig
-		Buffer int `psy:"buffer"`
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
@@ -606,16 +450,12 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	buffer := config.Buffer
-
 	spec := enrichSpec{
 		name: "ifunny-content",
 		targetRef: func(m map[string]any) (string, bool) {
 			s, ok := m["id"].(string)
 			return s, ok && s != ""
 		},
-		// Identity: source and target are the same entity, so
-		// resolveRef echoes the ref back — no op.
 		resolveRef: func(ref string) (string, error) { return ref, nil },
 		fetchTarget: func(id string) (any, error) {
 			content, err := client.GetContent(id)
@@ -629,8 +469,8 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		},
 	}
 
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
+	return func(data []byte) ([]byte, error) {
+		return runEnrich(data, &config.acceptConfig, &config.emitConfig, spec)
 	}, nil
 }
 
@@ -643,8 +483,7 @@ type userConfigT struct {
 	authConfig
 	acceptConfig
 	emitConfig
-	By     string `psy:"by"`
-	Buffer int    `psy:"buffer"`
+	By string `psy:"by"`
 }
 
 // userTransformer builds the ifunny-user transformer. It hydrates a
@@ -692,9 +531,6 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Sparse→sparse is identity in both modes: the reference axis
-	// stays consistent throughout the pipeline (id in, id out, or
-	// nick in, nick out — no cross-axis conversion).
 	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-user: accept=string emit=string is a no-op (%s → same %s)", config.By, config.By)
 	}
@@ -711,14 +547,11 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	buffer := config.Buffer
 	key := "id"
 	if byNick {
 		key = "nick"
 	}
 
-	// getUser hits the id or nick endpoint per by, swallowing not_found
-	// into (nil, nil) so runEnrich drops.
 	getUser := func(ref string) (*ifunny.User, error) {
 		req := compose.UserByID(ref)
 		if byNick {
@@ -740,16 +573,12 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			s, ok := m[key].(string)
 			return s, ok && s != ""
 		},
-		// Identity — the input ref is already keyed on the chosen
-		// axis, so nothing to resolve.
-		resolveRef: func(ref string) (string, error) { return ref, nil },
-		fetchTarget: func(ref string) (any, error) {
-			return getUser(ref)
-		},
+		resolveRef:  func(ref string) (string, error) { return ref, nil },
+		fetchTarget: func(ref string) (any, error) { return getUser(ref) },
 	}
 
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
+	return func(data []byte) ([]byte, error) {
+		return runEnrich(data, &config.acceptConfig, &config.emitConfig, spec)
 	}, nil
 }
 
@@ -782,7 +611,6 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		authConfig
 		acceptConfig
 		emitConfig
-		Buffer int `psy:"buffer"`
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
@@ -812,15 +640,12 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	buffer := config.Buffer
-
 	spec := enrichSpec{
 		name: "ifunny-channel",
 		targetRef: func(m map[string]any) (string, bool) {
 			s, ok := m["name"].(string)
 			return s, ok && s != ""
 		},
-		// Identity — channels are self-referential like content.
 		resolveRef: func(ref string) (string, error) { return ref, nil },
 		fetchTarget: func(name string) (any, error) {
 			channel, err := chat.GetChannel(compose.GetChannel(name))
@@ -834,7 +659,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		},
 	}
 
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		runEnrich(ctx, in, out, errs, &config.acceptConfig, &config.emitConfig, buffer, spec)
+	return func(data []byte) ([]byte, error) {
+		return runEnrich(data, &config.acceptConfig, &config.emitConfig, spec)
 	}, nil
 }

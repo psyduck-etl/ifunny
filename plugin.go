@@ -9,7 +9,7 @@ func main() {}
 
 // Plugin is the ABI entrypoint the psyduck host looks up in the compiled
 // plugin object. It returns the full set of iFunny content-discovery
-// resources assembled under the SDK v0.5.0 in-process plugin.
+// resources assembled under the SDK v0.5.2 in-process plugin.
 func Plugin() sdk.Plugin {
 	return sdk.NewInProc("ifunny",
 		// --- content producers ---
@@ -240,20 +240,19 @@ func Plugin() sdk.Plugin {
 				},
 				acceptSpec(),
 				emitSpec(),
-				bufferSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
-			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-content",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: contentTransformer,
-			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-user",
@@ -268,14 +267,13 @@ func Plugin() sdk.Plugin {
 				},
 				acceptSpec(),
 				emitSpec(),
-				bufferSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-channel",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: channelTransformer,
-			Spec:               specs(acceptSpec(), emitSpec(), bufferSpec()),
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 	)
 }

@@ -8,7 +8,7 @@ feed into itself: user profiles yield posts, posts yield comments, posts and
 comments yield the users who interacted with them, and those users yield more
 profiles.
 
-Built against the SDK v0.5.0 in-process plugin API and the extended
+Built against the SDK v0.5.2 in-process plugin API and the extended
 [ifunny-go](https://github.com/open-ifunny/ifunny-go) client.
 
 ## Loading
@@ -75,7 +75,7 @@ producers and lookups but **not** the chat resources.
 ## Rate limiting and cutoffs
 
 `per-minute` and `stop-after` are **host-owned** block attributes under SDK
-v0.5.0 — set them on any producer or consumer block and the host enforces
+v0.5.2 — set them on any producer or consumer block and the host enforces
 them; resources here do not declare them. The one exception is
 `ifunny-chat-listen`, which declares its own `stop-after` to tear down its
 live websocket subscription cleanly (a live subscription has no natural end).
@@ -201,7 +201,6 @@ Every transformer takes the shared auth surface (see
 | --- | --- | --- |
 | `accept` | `"json"` | Encoding of records the transformer *decodes*. `"json"` = a rich object trusted only insofar as we find it useful (missing fields fall back to a fetch by the source's own terminal ref). `"string"` = a bare terminal ref of the source; a fetch is always required to obtain intermediates. |
 | `emit` | `"json"` | Encoding of records the transformer *emits*. `"json"` = the fully-hydrated target — always fetched fresh; incoming rich objects are never re-emitted verbatim. `"string"` = the target's terminal ref, no hydration. |
-| `buffer` | `0` | Size of the internal channel between the transformer's resolve stage (decode + obtain target ref) and its emit stage (fetch + encode). The two stages always run as separate goroutines, so even a buffer of 0 pipelines — stage A can decode record N+1 while stage B fetches record N. Increase it to absorb jitter (a slow fetch in stage B) at the cost of memory. |
 
 | Resource | Options (beyond accept/emit) | S → T |
 | --- | --- | --- |

@@ -1,13 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/psyduck-etl/sdk"
 )
@@ -95,11 +92,11 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
 	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after", "emit"}},
 	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after", "emit"}},
-	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "emit-by", "accept", "emit", "buffer"}},
-	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
-	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
-	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit", "buffer"}},
-	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit", "buffer"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "emit-by", "accept", "emit"}},
+	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
+	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -278,21 +275,12 @@ func TestRunEnrichSparseIn_SparseOut(t *testing.T) {
 	c := &enrichCounters{}
 	spec := fakeSpec("test", "id", c, nil)
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte("xyz")
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("string"), 0, spec)
-
-	var got [][]byte
-	for b := range out {
-		got = append(got, b)
+	b, err := runEnrich([]byte("xyz"), testAccept("string"), testEmit("string"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
 	}
-	if len(got) != 1 || string(got[0]) != "xyz" {
-		t.Errorf("out = %q, want [xyz]", got)
+	if string(b) != "xyz" {
+		t.Errorf("out = %q, want xyz", b)
 	}
 	if c.resolveCalls != 1 {
 		t.Errorf("resolve = %d, want 1", c.resolveCalls)
@@ -307,25 +295,16 @@ func TestRunEnrichSparseIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
 	spec := fakeSpec("test", "id", c, &testEntity{Name: "resolved"})
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte("xyz")
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("json"), 0, spec)
-
+	b, err := runEnrich([]byte("xyz"), testAccept("string"), testEmit("json"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
 	got := new(testEntity)
-	b := <-out
 	if err := json.Unmarshal(b, got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.ID != "xyz" || got.Name != "resolved" {
 		t.Errorf("out = %+v, want id=xyz name=resolved", got)
-	}
-	if _, ok := <-out; ok {
-		t.Errorf("out not closed")
 	}
 	if c.fetchCalls != 1 {
 		t.Errorf("fetch = %d, want 1", c.fetchCalls)
@@ -338,18 +317,12 @@ func TestRunEnrichRichIn_SparseOut(t *testing.T) {
 	c := &enrichCounters{}
 	spec := fakeSpec("test", "id", c, nil)
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte(`{"id":"abc","name":"hydrated"}`)
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("string"), 0, spec)
-
-	b := <-out
+	b, err := runEnrich([]byte(`{"id":"abc","name":"hydrated"}`), testAccept("json"), testEmit("string"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
 	if string(b) != "abc" {
-		t.Errorf("out = %q, want abc", string(b))
+		t.Errorf("out = %q, want abc", b)
 	}
 	if c.resolveCalls != 0 || c.fetchCalls != 0 {
 		t.Errorf("no calls expected; got resolve=%d fetch=%d", c.resolveCalls, c.fetchCalls)
@@ -363,17 +336,12 @@ func TestRunEnrichRichIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
 	spec := fakeSpec("test", "id", c, &testEntity{Name: "fresh"})
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte(`{"id":"abc","name":"stale-cache"}`)
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), 0, spec)
-
+	b, err := runEnrich([]byte(`{"id":"abc","name":"stale-cache"}`), testAccept("json"), testEmit("json"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
 	got := new(testEntity)
-	if err := json.Unmarshal(<-out, got); err != nil {
+	if err := json.Unmarshal(b, got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.Name != "fresh" {
@@ -393,18 +361,12 @@ func TestRunEnrichRichMissingTargetFallsBack(t *testing.T) {
 	// targetRef misses and we fall through to resolveRef("src-id").
 	spec := fakeSpec("test", "author-id", c, nil)
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte(`{"id":"src-id","name":"no-target"}`)
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("string"), 0, spec)
-
-	b := <-out
+	b, err := runEnrich([]byte(`{"id":"src-id","name":"no-target"}`), testAccept("json"), testEmit("string"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
 	if string(b) != "src-id" {
-		t.Errorf("out = %q, want src-id (via fallback)", string(b))
+		t.Errorf("out = %q, want src-id (via fallback)", b)
 	}
 	if c.resolveCalls != 1 {
 		t.Errorf("resolve = %d, want 1 (fallback)", c.resolveCalls)
@@ -418,17 +380,12 @@ func TestRunEnrichNotFoundDrops(t *testing.T) {
 	// resolved == nil → fetchTarget returns (nil, nil).
 	spec := fakeSpec("test", "id", c, nil)
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 1)
-
-	in <- []byte("missing")
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("string"), testEmit("json"), 0, spec)
-
-	if _, ok := <-out; ok {
-		t.Errorf("expected no output on not-found")
+	b, err := runEnrich([]byte("missing"), testAccept("string"), testEmit("json"), spec)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if b != nil {
+		t.Errorf("out = %q, want nil (not-found drops)", b)
 	}
 }
 
@@ -438,91 +395,8 @@ func TestRunEnrichUnusableRichErrors(t *testing.T) {
 	c := &enrichCounters{}
 	spec := fakeSpec("test", "target-key", c, nil)
 
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 4)
-	errs := make(chan error, 4)
-
-	in <- []byte(`{"other":"foo"}`)
-	close(in)
-
-	runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), 0, spec)
-
-	select {
-	case err := <-errs:
-		if err == nil {
-			t.Errorf("nil error")
-		}
-	default:
+	_, err := runEnrich([]byte(`{"other":"foo"}`), testAccept("json"), testEmit("json"), spec)
+	if err == nil {
 		t.Errorf("expected an error on unusable rich input")
-	}
-}
-
-// TestRunEnrichPipelinesConcurrently verifies the two-stage pipe
-// property: while stage B is blocked fetching record 0, stage A should
-// keep decoding records and pushing them into the inter-stage buffer.
-// Without pipelining, stage A cannot advance until stage B accepts each
-// ref, and targetRef would be called at most once before the gate opens.
-//
-// Concretely: count targetRef invocations (stage A's per-record work)
-// while stage B is blocked. With buffer=N, stage A should be able to
-// process 1 (in-flight in B) + N (waiting in refs) = N+1 records before
-// blocking on a full buffer.
-func TestRunEnrichPipelinesConcurrently(t *testing.T) {
-	const records = 8
-	const buffer = 4
-
-	var mu sync.Mutex
-	targetRefCalls := 0
-	gate := make(chan struct{})
-
-	spec := enrichSpec{
-		name: "test",
-		targetRef: func(m map[string]any) (string, bool) {
-			mu.Lock()
-			targetRefCalls++
-			mu.Unlock()
-			s, ok := m["id"].(string)
-			return s, ok
-		},
-		resolveRef: func(ref string) (string, error) { return ref, nil },
-		fetchTarget: func(ref string) (any, error) {
-			<-gate // stage B blocked here for every record
-			return &testEntity{ID: ref}, nil
-		},
-	}
-
-	in := make(chan []byte, records)
-	out := make(chan []byte, records)
-	errs := make(chan error, records)
-
-	for i := 0; i < records; i++ {
-		in <- []byte(`{"id":"x"}`)
-	}
-	close(in)
-
-	done := make(chan struct{})
-	go func() {
-		runEnrich(context.Background(), in, out, errs, testAccept("json"), testEmit("json"), buffer, spec)
-		close(done)
-	}()
-
-	// Let stage A run to steady state — it can process at most
-	// buffer+1 records before blocking (buffer refs queued + 1 held by
-	// stage B, who's parked on gate).
-	time.Sleep(50 * time.Millisecond)
-
-	mu.Lock()
-	stalled := targetRefCalls
-	mu.Unlock()
-
-	// Release stage B so runEnrich can finish.
-	close(gate)
-	<-done
-
-	// Sequential model: targetRefCalls would be 1 here (stage A can't
-	// advance while stage B holds it, both in one goroutine).
-	// Piped model: stage A gets to buffer+1 records before blocking.
-	if stalled < buffer+1 {
-		t.Errorf("stage A only processed %d records while stage B blocked; want ≥ %d (buffer+1)", stalled, buffer+1)
 	}
 }
