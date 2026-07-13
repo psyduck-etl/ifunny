@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -16,7 +17,7 @@ import (
 //   - "json": end-to-end for the codec-dependent transformers/producers.
 //   - "string": the terminal-reference codec — its Decode returns a Go
 //     string of the input bytes, its Encode expects a string (anything
-//     else errors). The enrich transformers dispatch on this shape.
+//     else errors). bindEnrich dispatches on this shape.
 //
 // Anything else returns an error.
 func TestMain(m *testing.M) {
@@ -53,7 +54,7 @@ func (stringCodec) Encode(v any) ([]byte, error) {
 }
 
 // testAccept / testEmit build bound codec-config halves for driving
-// runEnrich directly. They panic on an unknown spec — a test-authoring
+// bindEnrich directly. They panic on an unknown spec — a test-authoring
 // bug, not a runtime condition.
 func testAccept(spec string) *acceptConfig {
 	c := &acceptConfig{Accept: spec}
@@ -92,7 +93,7 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
 	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
 	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "emit"}},
-	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "emit-by", "accept", "emit"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "source", "emit-by", "accept", "emit"}},
 	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
@@ -153,111 +154,95 @@ func TestClientSpecsAuthModes(t *testing.T) {
 	}
 }
 
-func TestExtractAuthor(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		body     string
-		wantID   string
-		wantNick string
-		wantOK   bool
-	}{
-		{
-			name:     "content creator",
-			body:     `{"id":"abc","creator":{"id":"u1","nick":"alice"}}`,
-			wantID:   "u1",
-			wantNick: "alice",
-			wantOK:   true,
-		},
-		{
-			name:     "comment user",
-			body:     `{"id":"c1","cid":"abc","user":{"id":"u2","nick":"bob"}}`,
-			wantID:   "u2",
-			wantNick: "bob",
-			wantOK:   true,
-		},
-		{
-			name:     "chat event user",
-			body:     `{"id":"m1","text":"hi","user":{"user":"u3","nick":"carol"}}`,
-			wantID:   "u3",
-			wantNick: "carol",
-			wantOK:   true,
-		},
-		{
-			name:   "no author",
-			body:   `{"id":"abc"}`,
-			wantOK: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(tc.body), &m); err != nil {
-				t.Fatalf("prep unmarshal: %v", err)
-			}
-			author, ok := extractAuthor(m)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
-			}
-			if !tc.wantOK {
-				return
-			}
-			if author.ID != tc.wantID || author.Nick != tc.wantNick {
-				t.Errorf("author = %+v, want id=%q nick=%q", author, tc.wantID, tc.wantNick)
-			}
-		})
-	}
+// TestAuthoredShadows pins the three source shadows against the
+// concrete json shapes ifunny-go produces. A library shape change (e.g.
+// a Comment field renamed away from json:"user") would break these
+// before any live pipeline hits a mis-extraction.
+func TestAuthoredShadows(t *testing.T) {
+	t.Run("content", func(t *testing.T) {
+		var s authoredContent
+		if err := json.Unmarshal([]byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u1" || s.AuthorNick() != "alice" {
+			t.Errorf("content shadow = (%q,%q), want (u1,alice)", s.AuthorID(), s.AuthorNick())
+		}
+	})
+	t.Run("comment", func(t *testing.T) {
+		var s authoredComment
+		if err := json.Unmarshal([]byte(`{"id":"c1","cid":"abc","user":{"id":"u2","nick":"bob"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u2" || s.AuthorNick() != "bob" {
+			t.Errorf("comment shadow = (%q,%q), want (u2,bob)", s.AuthorID(), s.AuthorNick())
+		}
+	})
+	t.Run("chat event", func(t *testing.T) {
+		// ChatEvent nests the author id under the inner json:"user"
+		// tag inside the outer "user" object.
+		var s authoredChatEvent
+		if err := json.Unmarshal([]byte(`{"id":"m1","text":"hi","user":{"user":"u3","nick":"carol"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u3" || s.AuthorNick() != "carol" {
+			t.Errorf("chat shadow = (%q,%q), want (u3,carol)", s.AuthorID(), s.AuthorNick())
+		}
+	})
 }
 
-// The chat event nests its author id under a "user" json key inside a
-// "user" object; extractAuthor must read that shape.
-func TestExtractAuthorChatEventShape(t *testing.T) {
-	var m map[string]any
-	if err := json.Unmarshal([]byte(`{"user":{"user":"u9","nick":"dan"}}`), &m); err != nil {
-		t.Fatalf("prep: %v", err)
-	}
-	author, ok := extractAuthor(m)
-	if !ok {
-		t.Fatalf("extractAuthor ok=false")
-	}
-	if author.ID != "u9" {
-		t.Errorf("id = %q, want u9", author.ID)
-	}
-}
-
-// --- runEnrich matrix coverage ------------------------------------------
+// --- bindEnrich matrix coverage --------------------------------------
 //
-// A fake enrichSpec + counters lets these tests walk every cell of the
+// A fake enrichPlan + counters lets these tests walk every cell of the
 // accept/emit matrix without a live client. Each test is one cell.
 
-// testEntity is the fake T that fakeSpec's fetchTarget returns.
+// testEntity is the fake T that fakePlan's fetch returns.
 type testEntity struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// enrichCounters records how often resolveRef and fetchTarget fired,
-// so tests can pin down "how many ops" per matrix cell.
+// enrichCounters records how often each plan primitive fired, so tests
+// can pin down "how many ops" per matrix cell.
 type enrichCounters struct {
+	extractCalls int
 	resolveCalls int
 	fetchCalls   int
 }
 
-// fakeSpec builds an enrichSpec whose targetRef reads targetField off
-// the input map, whose resolveRef echoes the source ref through (like
-// a same-entity transformer's identity resolve), and whose fetchTarget
-// returns a copy of resolved with ID replaced by ref (or nil,nil when
-// resolved is nil, simulating not-found).
-func fakeSpec(name, targetField string, c *enrichCounters, resolved *testEntity) enrichSpec {
-	return enrichSpec{
+// fakePlan builds an enrichPlan that reads its target ref off the
+// "target-ref" json field of the input record for the rich-in path and
+// echoes the sparse ref back for the sparse-in path (like a same-entity
+// transformer's identity resolve). fetch returns a copy of resolved
+// with ID = ref, or (nil, nil) when resolved is nil (not-found).
+//
+// If shortCircuit is true, extract returns a hydrated target alongside
+// the ref, exercising the rich-out short-circuit that skips fetch.
+func fakePlan(name string, c *enrichCounters, resolved *testEntity, shortCircuit bool) enrichPlan {
+	return enrichPlan{
 		name: name,
-		targetRef: func(m map[string]any) (string, bool) {
-			s, ok := m[targetField].(string)
-			return s, ok && s != ""
+		extract: func(data []byte) (string, any, error) {
+			c.extractCalls++
+			var s struct {
+				TargetRef string `json:"target-ref"`
+			}
+			if err := json.Unmarshal(data, &s); err != nil {
+				return "", nil, err
+			}
+			if s.TargetRef == "" {
+				return "", nil, nil
+			}
+			if shortCircuit && resolved != nil {
+				out := *resolved
+				out.ID = s.TargetRef
+				return s.TargetRef, &out, nil
+			}
+			return s.TargetRef, nil, nil
 		},
-		resolveRef: func(ref string) (string, error) {
+		resolve: func(ref string) (string, any, error) {
 			c.resolveCalls++
-			return ref, nil
+			return ref, nil, nil
 		},
-		fetchTarget: func(ref string) (any, error) {
+		fetch: func(ref string) (any, error) {
 			c.fetchCalls++
 			if resolved == nil {
 				return nil, nil
@@ -269,33 +254,39 @@ func fakeSpec(name, targetField string, c *enrichCounters, resolved *testEntity)
 	}
 }
 
-// sparse in + sparse out: resolveRef echoes the ref through; no fetch.
-// For a same-entity spec this is 0 API ops (resolveRef is trivial).
-func TestRunEnrichSparseIn_SparseOut(t *testing.T) {
-	c := &enrichCounters{}
-	spec := fakeSpec("test", "id", c, nil)
+func mustBind(t *testing.T, accept, emit string, plan enrichPlan) sdk.Transformer {
+	t.Helper()
+	tr, err := bindEnrich(testAccept(accept), testEmit(emit), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	return tr
+}
 
-	b, err := runEnrich([]byte("xyz"), testAccept("string"), testEmit("string"), spec)
+// sparse in + sparse out: resolve echoes the ref through; no extract,
+// no fetch.
+func TestBindEnrichSparseIn_SparseOut(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "string", "string", fakePlan("test", c, nil, false))
+
+	b, err := tr([]byte("xyz"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if string(b) != "xyz" {
 		t.Errorf("out = %q, want xyz", b)
 	}
-	if c.resolveCalls != 1 {
-		t.Errorf("resolve = %d, want 1", c.resolveCalls)
-	}
-	if c.fetchCalls != 0 {
-		t.Errorf("fetch = %d, want 0 (sparse out never hydrates)", c.fetchCalls)
+	if c.resolveCalls != 1 || c.fetchCalls != 0 || c.extractCalls != 0 {
+		t.Errorf("calls = %+v, want resolve=1 fetch=0 extract=0", *c)
 	}
 }
 
-// sparse in + rich out: one fetch to hydrate the target.
-func TestRunEnrichSparseIn_RichOut(t *testing.T) {
+// sparse in + rich out: resolve then fetch.
+func TestBindEnrichSparseIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
-	spec := fakeSpec("test", "id", c, &testEntity{Name: "resolved"})
+	tr := mustBind(t, "string", "json", fakePlan("test", c, &testEntity{Name: "resolved"}, false))
 
-	b, err := runEnrich([]byte("xyz"), testAccept("string"), testEmit("json"), spec)
+	b, err := tr([]byte("xyz"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -306,37 +297,36 @@ func TestRunEnrichSparseIn_RichOut(t *testing.T) {
 	if got.ID != "xyz" || got.Name != "resolved" {
 		t.Errorf("out = %+v, want id=xyz name=resolved", got)
 	}
-	if c.fetchCalls != 1 {
-		t.Errorf("fetch = %d, want 1", c.fetchCalls)
+	if c.resolveCalls != 1 || c.fetchCalls != 1 {
+		t.Errorf("calls = %+v, want resolve=1 fetch=1", *c)
 	}
 }
 
-// rich in + sparse out: 0 ops. Target ref is read from the map and
-// emitted directly; no resolve, no fetch.
-func TestRunEnrichRichIn_SparseOut(t *testing.T) {
+// rich in + sparse out: 0 API ops. Target ref is read from the shadow
+// and emitted directly.
+func TestBindEnrichRichIn_SparseOut(t *testing.T) {
 	c := &enrichCounters{}
-	spec := fakeSpec("test", "id", c, nil)
+	tr := mustBind(t, "json", "string", fakePlan("test", c, nil, false))
 
-	b, err := runEnrich([]byte(`{"id":"abc","name":"hydrated"}`), testAccept("json"), testEmit("string"), spec)
+	b, err := tr([]byte(`{"target-ref":"abc","other":"ignored"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if string(b) != "abc" {
 		t.Errorf("out = %q, want abc", b)
 	}
-	if c.resolveCalls != 0 || c.fetchCalls != 0 {
-		t.Errorf("no calls expected; got resolve=%d fetch=%d", c.resolveCalls, c.fetchCalls)
+	if c.extractCalls != 1 || c.resolveCalls != 0 || c.fetchCalls != 0 {
+		t.Errorf("calls = %+v, want extract=1 resolve=0 fetch=0", *c)
 	}
 }
 
-// rich in + rich out: fetches T fresh. Rich emission is always a
-// hydrator — the input map is never assumed *fully* rich, so we
-// re-fetch even when the input already carries a stale name.
-func TestRunEnrichRichIn_RichOut(t *testing.T) {
+// rich in + rich out: extract T's ref, then fetch fresh. The emit
+// doctrine forbids returning stale rich objects verbatim.
+func TestBindEnrichRichIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
-	spec := fakeSpec("test", "id", c, &testEntity{Name: "fresh"})
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
 
-	b, err := runEnrich([]byte(`{"id":"abc","name":"stale-cache"}`), testAccept("json"), testEmit("json"), spec)
+	b, err := tr([]byte(`{"target-ref":"abc","name":"stale-cache"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -352,35 +342,54 @@ func TestRunEnrichRichIn_RichOut(t *testing.T) {
 	}
 }
 
-// Partial rich (map missing the transformer's target field): fall back
-// to resolveRef via the map's "id" (source-ref) field. This is the
-// "trusted only insofar as we find it useful" case.
-func TestRunEnrichRichMissingTargetFallsBack(t *testing.T) {
+// rich in + rich out with short-circuit: extract already hydrated the
+// target (by-nick recovery flow); fetch must not fire.
+func TestBindEnrichRichIn_RichOut_ShortCircuit(t *testing.T) {
 	c := &enrichCounters{}
-	// Target field is "author-id" but the map has only "id" — so
-	// targetRef misses and we fall through to resolveRef("src-id").
-	spec := fakeSpec("test", "author-id", c, nil)
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "recovered"}, true))
 
-	b, err := runEnrich([]byte(`{"id":"src-id","name":"no-target"}`), testAccept("json"), testEmit("string"), spec)
+	b, err := tr([]byte(`{"target-ref":"abc"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if string(b) != "src-id" {
-		t.Errorf("out = %q, want src-id (via fallback)", b)
+	got := new(testEntity)
+	if err := json.Unmarshal(b, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if c.resolveCalls != 1 {
-		t.Errorf("resolve = %d, want 1 (fallback)", c.resolveCalls)
+	if got.Name != "recovered" {
+		t.Errorf("out.name = %q, want recovered (short-circuit)", got.Name)
+	}
+	if c.fetchCalls != 0 {
+		t.Errorf("fetch = %d, want 0 (short-circuit skips fetch)", c.fetchCalls)
 	}
 }
 
-// A fetchTarget that returns (nil, nil) — the not-found convention —
-// drops the record.
-func TestRunEnrichNotFoundDrops(t *testing.T) {
+// Rich input whose extract returns an empty ref drops (no author on the
+// record; nothing to emit).
+func TestBindEnrichRichIn_EmptyRefDrops(t *testing.T) {
 	c := &enrichCounters{}
-	// resolved == nil → fetchTarget returns (nil, nil).
-	spec := fakeSpec("test", "id", c, nil)
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
 
-	b, err := runEnrich([]byte("missing"), testAccept("string"), testEmit("json"), spec)
+	b, err := tr([]byte(`{"other":"foo"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if b != nil {
+		t.Errorf("out = %q, want nil (empty ref drops)", b)
+	}
+	if c.fetchCalls != 0 {
+		t.Errorf("fetch = %d, want 0", c.fetchCalls)
+	}
+}
+
+// A fetch that returns (nil, nil) — the not-found convention — drops
+// the record.
+func TestBindEnrichNotFoundDrops(t *testing.T) {
+	c := &enrichCounters{}
+	// resolved == nil → fetch returns (nil, nil).
+	tr := mustBind(t, "string", "json", fakePlan("test", c, nil, false))
+
+	b, err := tr([]byte("missing"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -389,14 +398,62 @@ func TestRunEnrichNotFoundDrops(t *testing.T) {
 	}
 }
 
-// Rich input with neither the target ref nor an "id" fallback field
-// → per-record error.
-func TestRunEnrichUnusableRichErrors(t *testing.T) {
-	c := &enrichCounters{}
-	spec := fakeSpec("test", "target-key", c, nil)
-
-	_, err := runEnrich([]byte(`{"other":"foo"}`), testAccept("json"), testEmit("json"), spec)
+// A plan with resolve = nil and accept = "string" errors at bind: the
+// unfetchable-source cell (source = comment | chat on ifunny-author).
+func TestBindEnrichUnfetchableSparseErrors(t *testing.T) {
+	plan := enrichPlan{
+		name:    "test",
+		extract: func([]byte) (string, any, error) { return "", nil, nil },
+		fetch:   func(string) (any, error) { return nil, nil },
+	}
+	_, err := bindEnrich(testAccept("string"), testEmit("json"), plan)
 	if err == nil {
-		t.Errorf("expected an error on unusable rich input")
+		t.Fatal("expected bind error for accept=string with nil resolve")
+	}
+}
+
+// A plan with resolve = nil is fine on rich-in cells.
+func TestBindEnrichUnfetchableRichOK(t *testing.T) {
+	plan := enrichPlan{
+		name: "test",
+		extract: func(data []byte) (string, any, error) {
+			var s struct {
+				TargetRef string `json:"target-ref"`
+			}
+			if err := json.Unmarshal(data, &s); err != nil {
+				return "", nil, err
+			}
+			return s.TargetRef, nil, nil
+		},
+		fetch: func(string) (any, error) { return nil, nil },
+	}
+	tr, err := bindEnrich(testAccept("json"), testEmit("string"), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	b, err := tr([]byte(`{"target-ref":"abc"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if string(b) != "abc" {
+		t.Errorf("out = %q, want abc", b)
+	}
+}
+
+// An extract that returns an error surfaces per-record (SDK v0.5.2
+// per-record transformer contract).
+func TestBindEnrichExtractErrorPropagates(t *testing.T) {
+	sentinel := errors.New("shadow decode failed")
+	plan := enrichPlan{
+		name:    "test",
+		extract: func([]byte) (string, any, error) { return "", nil, sentinel },
+		fetch:   func(string) (any, error) { return nil, nil },
+	}
+	tr, err := bindEnrich(testAccept("json"), testEmit("json"), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	if _, err := tr([]byte(`{}`)); !errors.Is(err, sentinel) {
+		t.Errorf("err = %v, want sentinel", err)
 	}
 }

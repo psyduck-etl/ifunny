@@ -219,6 +219,12 @@ func Plugin() sdk.Plugin {
 			ProvideTransformer: authorTransformer,
 			Spec: specs(
 				&sdk.Spec{
+					Name:        "source",
+					Description: `which source entity type the transformer decodes, one of: "content" (default), "comment", or "chat". "comment" and "chat" cannot use accept = "string" — no fetch-by-ref endpoint exists for them.`,
+					Type:        sdk.TypeString,
+					Default:     "content",
+				},
+				&sdk.Spec{
 					Name:        "emit-by",
 					Description: `which author reference to emit and fetch by, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
 					Type:        sdk.TypeString,

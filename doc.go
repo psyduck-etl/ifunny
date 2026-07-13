@@ -61,10 +61,16 @@
 //     target's terminal ref, no hydration.
 //
 // The accept×emit matrix is solved at bind time. Bind-time errors:
-// ifunny-tags with emit = "string" (no terminal ref for a tag list), and
-// the identity resources with accept = emit = "string" (ifunny-content,
+// ifunny-tags with emit = "string" (no terminal ref for a tag list);
+// ifunny-author with source = "comment" or "chat" and accept = "string"
+// (no fetch-by-ref endpoint for those sources); and the identity
+// resources with accept = emit = "string" (ifunny-content,
 // ifunny-channel, ifunny-user — the reference axis is consistent
 // end-to-end, so sparse→sparse has nothing to do in either by mode).
+//
+// ifunny-author's source (default "content"; also "comment", "chat")
+// picks the source entity type at bind, so one transformer instance
+// handles one upstream shape via a per-source shadow struct.
 //
 // ifunny-user's by and ifunny-author's emit-by (both "id" by default,
 // or "nick") pick the user reference axis applied throughout: which
