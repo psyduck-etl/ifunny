@@ -6,15 +6,6 @@ import (
 	"github.com/psyduck-etl/sdk"
 )
 
-// codecFor resolves a codec spec via the sdk-registered codec factory.
-// The host binary (psyduck) installs a factory at startup; standalone
-// tests register a stub in TestMain. Spec strings are matched exactly —
-// codec names are lowercase, and a config value like "JSON" is rejected
-// at bind time rather than silently normalized.
-func codecFor(spec string) (sdk.Codec, error) {
-	return sdk.GetCodec(spec)
-}
-
 // stringy reports whether spec names the "string" codec — the one that
 // carries a bare terminal reference per record (a content id, user id,
 // channel name) rather than a discrete structured object. Only the literal
@@ -37,8 +28,13 @@ type acceptConfig struct {
 	codec  sdk.Codec
 }
 
+// bind resolves the accept codec via the sdk-registered factory (the
+// host installs one at startup; standalone tests register a stub in
+// TestMain). Spec strings match exactly — codec names are lowercase,
+// and a config value like "JSON" is rejected here rather than silently
+// normalized.
 func (c *acceptConfig) bind() (err error) {
-	c.codec, err = codecFor(c.Accept)
+	c.codec, err = sdk.GetCodec(c.Accept)
 	return err
 }
 
@@ -60,8 +56,13 @@ type emitConfig struct {
 	codec sdk.Codec
 }
 
+// bind resolves the emit codec via the sdk-registered factory (the
+// host installs one at startup; standalone tests register a stub in
+// TestMain). Spec strings match exactly — codec names are lowercase,
+// and a config value like "JSON" is rejected here rather than silently
+// normalized.
 func (c *emitConfig) bind() (err error) {
-	c.codec, err = codecFor(c.Emit)
+	c.codec, err = sdk.GetCodec(c.Emit)
 	return err
 }
 

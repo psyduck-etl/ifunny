@@ -67,16 +67,16 @@ var (
 
 // parseUserBy validates a "by" or "emit-by" string against the two
 // user reference axes. Returns true iff the caller should key on nick.
-// The resource name is included in the error so ifunny-user vs
-// ifunny-author callers get a self-locating message.
-func parseUserBy(v, resource string) (byNick bool, err error) {
+// Callers wrap the returned error with their resource name so
+// ifunny-user vs ifunny-author gets a self-locating message.
+func parseUserBy(v string) (byNick bool, err error) {
 	switch v {
 	case "id":
 		return false, nil
 	case "nick":
 		return true, nil
 	default:
-		return false, fmt.Errorf("%s: unrecognized user reference axis %q; want \"id\" or \"nick\"", resource, v)
+		return false, fmt.Errorf("unrecognized user reference axis %q; want \"id\" or \"nick\"", v)
 	}
 }
 
@@ -204,8 +204,8 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 // A record whose author cannot be resolved (system-authored, or the
 // axis field ends up empty) drops from the pipeline.
 //
-// Requires auth (shared client surface). Accept / emit default to
-// "json"; source defaults to "content" for back-compat.
+// Requires auth (shared client surface). source is required; accept
+// and emit default to "json".
 //
 // Example (glue step between posts and their commenters' timelines):
 //
@@ -230,16 +230,15 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
-		Source:       "content",
 		EmitBy:       "id",
 	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
 
-	byNick, err := parseUserBy(config.EmitBy, "ifunny-author")
+	byNick, err := parseUserBy(config.EmitBy)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ifunny-author: %w", err)
 	}
 
 	if err := config.acceptConfig.bind(); err != nil {
@@ -267,19 +266,15 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return u, nil
 	}
 
-	// recoverNick recovers an authoritative nick from an author id
-	// when the source shape had the id but no nick. It returns the
-	// hydrated User so the rich-out path can short-circuit fetch.
-	recoverNick := func(id string) (string, *ifunny.User, error) {
-		u, err := getUser(compose.UserByID(id))
-		if err != nil || u == nil {
-			return "", nil, err
-		}
-		return u.Nick, u, nil
+	// recoverUser hydrates a User by id when the source had the id but
+	// no nick. It returns the hydrated User so the rich-out path can
+	// short-circuit fetch; callers read u.Nick themselves.
+	recoverUser := func(id string) (*ifunny.User, error) {
+		return getUser(compose.UserByID(id))
 	}
 
 	// pickRef reads the emit-by axis field off any Authored source.
-	// Under by=nick with an empty nick, it recoveries via GetUser and
+	// Under by=nick with an empty nick, it recovers via GetUser and
 	// returns the hydrated user for short-circuit; if the id is also
 	// empty, the record drops.
 	pickRef := func(a ifunny.Authored) (string, any, error) {
@@ -294,7 +289,11 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		if id == "" {
 			return "", nil, nil
 		}
-		return recoverNick(id)
+		u, err := recoverUser(id)
+		if err != nil || u == nil {
+			return "", nil, err
+		}
+		return u.Nick, u, nil
 	}
 
 	plan := enrichPlan{
@@ -330,8 +329,11 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			if content.Creator.Nick != "" {
 				return content.Creator.Nick, nil, nil
 			}
-			nick, u, err := recoverNick(content.Creator.ID)
-			return nick, u, err
+			u, err := recoverUser(content.Creator.ID)
+			if err != nil || u == nil {
+				return "", nil, err
+			}
+			return u.Nick, u, nil
 		}
 	case "comment":
 		plan.extract = func(data []byte) (string, any, error) {
@@ -350,7 +352,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			return pickRef(&s)
 		}
 	default:
-		return nil, fmt.Errorf("ifunny-author: unrecognized source %q; want \"content\", \"comment\", or \"chat\"", config.Source)
+		return nil, fmt.Errorf("ifunny-author: source is required (one of \"content\", \"comment\", \"chat\"); got %q", config.Source)
 	}
 
 	return bindEnrich(&config.acceptConfig, &config.emitConfig, plan)
@@ -603,9 +605,9 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	byNick, err := parseUserBy(config.By, "ifunny-user")
+	byNick, err := parseUserBy(config.By)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ifunny-user: %w", err)
 	}
 	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
 		return nil, fmt.Errorf("ifunny-user: accept=string emit=string is a no-op (%s → same %s)", config.By, config.By)

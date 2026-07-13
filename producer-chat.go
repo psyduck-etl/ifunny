@@ -12,8 +12,8 @@ import (
 // channel name.
 type chatConfig struct {
 	authConfig
-	Channel string `psy:"channel"`
 	emitConfig
+	Channel string `psy:"channel"`
 }
 
 // produceChatHistory builds the ifunny-chat-history producer. It backfills
@@ -65,8 +65,8 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 // chatListenConfig configures ifunny-chat-listen.
 type chatListenConfig struct {
 	authConfig
-	Channel string `psy:"channel"`
 	emitConfig
+	Channel string `psy:"channel"`
 }
 
 // produceChatListen builds the ifunny-chat-listen producer. It streams
@@ -133,10 +133,8 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 			return
 		}
 
-		defer func() {
-			close(done)
-			unsubscribe()
-		}()
+		defer unsubscribe()
+		defer close(done)
 
 		for {
 			select {
@@ -230,10 +228,8 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 			return
 		}
 
-		defer func() {
-			close(done)
-			unsubscribe()
-		}()
+		defer unsubscribe()
+		defer close(done)
 
 		for {
 			select {
@@ -262,8 +258,8 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 // hits the paginated open-channels search.
 type channelsConfig struct {
 	authConfig
-	Query string `psy:"query"`
 	emitConfig
+	Query string `psy:"query"`
 }
 
 // produceChannels builds the ifunny-channels producer. It emits ChatChannel
@@ -310,30 +306,11 @@ func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	// An empty query means "trending", which is a single non-paged fetch;
-	// a query hits the paginated open-channels search.
+	// An empty query means "trending" — a one-shot iterator upstream
+	// (no pagination); a query hits the paginated open-channels search.
 	if config.Query == "" {
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			defer close(send)
-
-			channels, err := client.GetChannels(compose.ChatsTrending)
-			if err != nil {
-				sendErr(ctx, errs, err)
-				return
-			}
-
-			for _, channel := range channels {
-				b, err := config.Encode(channel)
-				if err != nil {
-					sendErr(ctx, errs, err)
-					return
-				}
-				select {
-				case send <- b:
-				case <-ctx.Done():
-					return
-				}
-			}
+			produceIter(ctx, client.IterChannelsTrending(), send, errs, &config.emitConfig)
 		}, nil
 	}
 

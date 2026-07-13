@@ -125,7 +125,6 @@ flowchart LR
     Content -- ifunny-republishers --> User
     Content -- ifunny-author --> User
 
-    Comment -- ifunny-replies --> Comment
     Comment -- ifunny-author --> User
 
     User -- ifunny-timeline --> Content
@@ -162,8 +161,7 @@ options (see [Authentication](#authentication)) and `emit`.
 | `ifunny-feed` | `feed` | Content | — (seed) |
 | `ifunny-timeline` | `by-id`, `by-nick` (mutex) | Content | `User.id` or `User.nick` |
 | `ifunny-explore` | `compilation`, `kind` | Content / User / ChatChannel | — (seed) |
-| `ifunny-comments` | `content` | Comment | `Content.id` |
-| `ifunny-replies` | `content`, `comment` | Comment | `Comment.cid` + `Comment.id` |
+| `ifunny-comments` | `content` | Comment (forest: top-level then each comment's replies) | `Content.id` |
 | `ifunny-smiles` | `content` | User | `Content.id` |
 | `ifunny-republishers` | `content` | User | `Content.id` |
 | `ifunny-subscribers` | `user` | User | `User.id` |
@@ -185,8 +183,16 @@ Notes:
 - **`ifunny-explore`** `kind` is one of `content`, `user`, `chat` and must
   match the compilation (e.g. `content_top_today` with `content`,
   `users_top_overall` with `user`, `chats_popular_last_week` with `chat`).
+- **`ifunny-comments`** walks the comment forest depth-first: it emits
+  each top-level comment and then, before advancing, drains that
+  comment's replies (when `comment.num.replies > 0`). One stream
+  therefore carries the whole thread; there is no separate replies
+  producer.
 - **`ifunny-channels`** with an empty `query` (the default) yields trending
-  public channels; a non-empty `query` searches open channels.
+  public channels; a non-empty `query` searches open channels. Trending is
+  a one-shot fetch (no pagination), served through the same result-iterator
+  contract as the query search — see `IterChannelsTrending` in ifunny-go
+  v0.1.3+.
 - **`ifunny-chat-history`** backfills a channel's message history over the
   chat websocket. **`ifunny-chat-listen`** streams live events; set the
   block-level `stop-after` to bound collection.
@@ -206,7 +212,7 @@ Every transformer takes the shared auth surface (see
 
 | Resource | Options (beyond accept/emit) | S → T |
 | --- | --- | --- |
-| `ifunny-author` | `source = "content"` (default), `"comment"`, or `"chat"`; `emit-by = "id"` (default) or `"nick"` | Content / Comment / ChatEvent → User (S picked at bind by `source`) |
+| `ifunny-author` | `source` **(required)** — one of `"content"`, `"comment"`, `"chat"`; `emit-by = "id"` (default) or `"nick"` | Content / Comment / ChatEvent → User (S picked at bind by `source`) |
 | `ifunny-tags` | — | Content → `{"tags": [...]}` (json emit only) |
 | `ifunny-content` | — | Content ref → Content |
 | `ifunny-user` | `by = "id"` (default) or `"nick"` | User ref → User |
@@ -246,10 +252,10 @@ Bind-time errors:
 Runtime behavior notes:
 
 - **`ifunny-author`** extracts the author reference from the source
-  entity picked by `source`: `"content"` reads `creator`, `"comment"`
-  reads `user`, `"chat"` reads `user` (with the chat-event inner
-  `"user"` id-tag). One instance handles one source. `emit-by` (default
-  `"id"`) picks the reference axis: `"id"` reads/emits the numeric user
+  entity picked by `source` (required — no default): `"content"` reads
+  `creator`, `"comment"` reads `user`, `"chat"` reads `user` (with the
+  chat-event inner `"user"` id-tag). One instance handles one source.
+  `emit-by` (default `"id"`) picks the reference axis: `"id"` reads/emits the numeric user
   id, `"nick"` reads/emits the nickname. Sparse emit produces the bare
   id (or nick); rich emit fetches the full User keyed on the same
   axis. Under `emit-by = "nick"`, if the source omits the nick but has

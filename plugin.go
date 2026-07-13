@@ -83,26 +83,6 @@ func Plugin() sdk.Plugin {
 				emitSpec(),
 			),
 		},
-		&sdk.Resource{
-			Name:            "ifunny-replies",
-			Kinds:           sdk.PRODUCER,
-			ProvideProducer: produceReplies,
-			Spec: specs(
-				&sdk.Spec{
-					Name:        "content",
-					Description: "content id the comment lives on",
-					Type:        sdk.TypeString,
-					Required:    true,
-				},
-				&sdk.Spec{
-					Name:        "comment",
-					Description: "comment id to pull replies from",
-					Type:        sdk.TypeString,
-					Required:    true,
-				},
-				emitSpec(),
-			),
-		},
 
 		// --- user producers ---
 		&sdk.Resource{
@@ -220,9 +200,9 @@ func Plugin() sdk.Plugin {
 			Spec: specs(
 				&sdk.Spec{
 					Name:        "source",
-					Description: `which source entity type the transformer decodes, one of: "content" (default), "comment", or "chat". "comment" and "chat" cannot use accept = "string" — no fetch-by-ref endpoint exists for them.`,
+					Description: `which source entity type the transformer decodes, one of: "content", "comment", or "chat". "comment" and "chat" cannot use accept = "string" — no fetch-by-ref endpoint exists for them.`,
 					Type:        sdk.TypeString,
-					Default:     "content",
+					Required:    true,
 				},
 				&sdk.Spec{
 					Name:        "emit-by",

@@ -11,8 +11,8 @@ import (
 // as "featured" or "collective".
 type feedConfig struct {
 	authConfig
-	Feed string `psy:"feed"`
 	emitConfig
+	Feed string `psy:"feed"`
 }
 
 // produceFeed builds the ifunny-feed producer. It walks a global iFunny
@@ -59,9 +59,9 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 // on edge cases like renames.
 type timelineConfig struct {
 	authConfig
+	emitConfig
 	ByID   string `psy:"by-id"`
 	ByNick string `psy:"by-nick"`
-	emitConfig
 }
 
 // produceTimeline builds the ifunny-timeline producer. It walks the posts
@@ -128,9 +128,9 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 // entity type — content_* → "content", users_* → "user", chats_* → "chat".
 type exploreConfig struct {
 	authConfig
+	emitConfig
 	Compilation string `psy:"compilation"`
 	Kind        string `psy:"kind"`
-	emitConfig
 }
 
 // produceExplore builds the ifunny-explore producer. It walks one of

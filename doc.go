@@ -17,8 +17,9 @@
 //   - ifunny-feed          — [produceFeed]
 //   - ifunny-timeline      — [produceTimeline]
 //   - ifunny-explore       — [produceExplore]
-//   - ifunny-comments      — [produceComments]
-//   - ifunny-replies       — [produceReplies]
+//   - ifunny-comments      — [produceComments] (walks the comment forest:
+//     each top-level comment is followed by its replies before the next
+//     top-level comment)
 //   - ifunny-smiles        — [produceSmiles]
 //   - ifunny-republishers  — [produceRepublishers]
 //   - ifunny-subscribers   — [produceSubscribers]
@@ -68,7 +69,7 @@
 // ifunny-channel, ifunny-user — the reference axis is consistent
 // end-to-end, so sparse→sparse has nothing to do in either by mode).
 //
-// ifunny-author's source (default "content"; also "comment", "chat")
+// ifunny-author's source (required — "content", "comment", or "chat")
 // picks the source entity type at bind, so one transformer instance
 // handles one upstream shape via a per-source shadow struct.
 //

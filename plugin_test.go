@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/psyduck-etl/sdk"
 )
 
@@ -84,7 +86,6 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
 	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
 	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
-	"ifunny-replies":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment", "emit"}},
 	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
 	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
 	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
@@ -455,5 +456,186 @@ func TestBindEnrichExtractErrorPropagates(t *testing.T) {
 	}
 	if _, err := tr([]byte(`{}`)); !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want sentinel", err)
+	}
+}
+
+// testParser wraps a map into an sdk.Parser via mapstructure, so tests
+// can drive transformer factories without an HCL host. TagName "psy"
+// mirrors production; Squash flattens embedded config halves
+// (authConfig / acceptConfig / emitConfig) so their fields sit at the
+// top level of the values map, matching how the host parses HCL blocks.
+func testParser(values map[string]any) sdk.Parser {
+	return func(dst any) error {
+		dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+			TagName: "psy",
+			Squash:  true,
+			Result:  dst,
+		})
+		if err != nil {
+			return err
+		}
+		return dec.Decode(values)
+	}
+}
+
+// withAuth returns a values map preloaded with a literal auth-basic token
+// and android user-agent block — clientFor accepts these without any
+// network call (see client.go: literal auth-basic hits MakeClientBasic
+// directly), which is what makes bind-level tests here safe. extra fields
+// overlay onto the base.
+func withAuth(extra map[string]any) map[string]any {
+	m := map[string]any{
+		"auth-basic": "test-token",
+		"user-agent": map[string]any{
+			"device":         "android",
+			"device-version": "14",
+		},
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestParseUserBy covers the new one-arg signature: caller wraps its own
+// resource-name prefix around the returned error.
+func TestParseUserBy(t *testing.T) {
+	cases := []struct {
+		in      string
+		byNick  bool
+		wantErr bool
+	}{
+		{"id", false, false},
+		{"nick", true, false},
+		{"bogus", false, true},
+		{"", false, true},
+	}
+	for _, tc := range cases {
+		name := tc.in
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			got, err := parseUserBy(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if got != tc.byNick {
+				t.Errorf("byNick = %v, want %v", got, tc.byNick)
+			}
+		})
+	}
+}
+
+// TestTagsTransformer exercises the bind-level refusals and the per-record
+// paths that don't reach the iFunny API (rich input carrying tags or an
+// unfetchable no-id map). The id-fallback path is intentionally not tested
+// here — it calls GetContent, which is a network operation.
+func TestTagsTransformer(t *testing.T) {
+	t.Run("EmitStringRejected", func(t *testing.T) {
+		_, err := tagsTransformer(testParser(withAuth(map[string]any{"emit": "string"})))
+		if err == nil || !strings.Contains(err.Error(), "ifunny-tags") {
+			t.Fatalf("expected ifunny-tags bind error, got %v", err)
+		}
+	})
+
+	t.Run("RichInputTagsPresent", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		out, err := tr([]byte(`{"tags":["cats","memes"]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
+		}
+		var got tagsEnvelope
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if want := []string{"cats", "memes"}; !equalStrings(got.Tags, want) {
+			t.Errorf("tags = %v, want %v", got.Tags, want)
+		}
+	})
+
+	t.Run("RichInputMixedTypesSkipsNonStrings", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		out, err := tr([]byte(`{"tags":["a", 1, "b", null, "c"]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
+		}
+		var got tagsEnvelope
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if want := []string{"a", "b", "c"}; !equalStrings(got.Tags, want) {
+			t.Errorf("tags = %v, want %v", got.Tags, want)
+		}
+	})
+
+	t.Run("RichInputEmptyTagsDrops", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		out, err := tr([]byte(`{"tags":[]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
+		}
+		if out != nil {
+			t.Errorf("out = %s, want nil (drop)", out)
+		}
+	})
+
+	t.Run("RichInputNoTagsNoIDErrors", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		_, err = tr([]byte(`{"other":"value"}`))
+		if err == nil || !strings.Contains(err.Error(), "no id field") {
+			t.Errorf("err = %v, want no-id fallback error", err)
+		}
+	})
+}
+
+// TestAuthorTransformerBindErrors covers bind-time refusals only — every
+// case here fails before authorTransformer's returned closure runs, so no
+// API call is possible.
+func TestAuthorTransformerBindErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		values map[string]any
+	}{
+		{"SourceMissing", nil},
+		{"SourceUnknown", map[string]any{"source": "post"}},
+		{"SourceCommentAcceptStringRejected", map[string]any{"source": "comment", "accept": "string"}},
+		{"SourceChatAcceptStringRejected", map[string]any{"source": "chat", "accept": "string"}},
+		{"EmitByBogus", map[string]any{"source": "content", "emit-by": "email"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := authorTransformer(testParser(withAuth(tc.values)))
+			if err == nil {
+				t.Fatalf("expected bind error, got nil")
+			}
+			if !strings.Contains(err.Error(), "ifunny-author") {
+				t.Errorf("error message missing ifunny-author prefix: %v", err)
+			}
+		})
 	}
 }

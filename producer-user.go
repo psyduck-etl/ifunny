@@ -81,8 +81,8 @@ func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
 // ifunny-subscribers and ifunny-subscriptions.
 type userConfig struct {
 	authConfig
-	User string `psy:"user"`
 	emitConfig
+	User string `psy:"user"`
 }
 
 // produceSubscribers builds the ifunny-subscribers producer. It walks the
