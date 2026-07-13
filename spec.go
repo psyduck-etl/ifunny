@@ -22,11 +22,13 @@ import "github.com/psyduck-etl/sdk"
 // UAs ifunny-go's Android{} / IOS{} types produce.
 //
 // Rate limiting (per-minute) and item cutoffs (stop-after) are host-owned
-// BlockMeta attributes under the SDK v0.5.0 plugin API — the host decodes
-// and enforces them out of band, so resources here never declare them. The
-// one exception is ifunny-chat-listen (and ifunny-chat-invites), which
-// declare their own stop-after to terminate their websocket subscription
-// cleanly (see produce-chat.go).
+// BlockMeta attributes under the SDK v0.5.2 plugin API — the host decodes
+// and enforces them out of band, so resources here never declare them.
+// This includes the live-subscription chat resources (ifunny-chat-listen,
+// ifunny-chat-invites): the host's flow.Producer wrapper cancels their
+// ctx at the cutoff and their loops unsubscribe cleanly via ctx.Done.
+// Requires a psyduck host with gastrodon/psyduck#29 (flow: cancel inner
+// ctx on cutoff).
 func clientSpecs() []*sdk.Spec {
 	return []*sdk.Spec{
 		{
@@ -80,3 +82,37 @@ func clientSpecs() []*sdk.Spec {
 func specs(extra ...*sdk.Spec) []*sdk.Spec {
 	return append(clientSpecs(), extra...)
 }
+
+// acceptSpec is a resource's input encoding — transformers take one, and
+// so would any future consumer. Producers only emit and take emitSpec
+// alone. For transformers it decides the front half of the matrix:
+// "string" means the input is a bare terminal ref
+// (sparse — a fetch will be needed to obtain any intermediates);
+// "json" means the input is an object (rich — we trust it insofar as
+// we find it useful, falling back to a fetch keyed by the input's own
+// terminal ref when the field we need isn't present).
+func acceptSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "accept",
+		Description: "encoding of records the transformer accepts on input, e.g. json (a rich object) or string (a bare terminal reference)",
+		Type:        sdk.TypeString,
+		Default:     "json",
+	}
+}
+
+// emitSpec is a resource's output encoding, shared by producers and
+// transformers. For transformers it decides the back half of the matrix:
+// "string" means emit the target's terminal ref (no hydration — a bare
+// id or name); "json" means emit the fully-hydrated target (always
+// fetched — an incoming object is never trusted as _fully_ rich for
+// emission). Producers emit whatever their iterator yields, encoded via
+// this codec.
+func emitSpec() *sdk.Spec {
+	return &sdk.Spec{
+		Name:        "emit",
+		Description: "encoding of records the resource emits, e.g. json (a structured object) or string (a bare terminal reference)",
+		Type:        sdk.TypeString,
+		Default:     "json",
+	}
+}
+

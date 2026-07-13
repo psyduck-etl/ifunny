@@ -8,7 +8,7 @@ feed into itself: user profiles yield posts, posts yield comments, posts and
 comments yield the users who interacted with them, and those users yield more
 profiles.
 
-Built against the SDK v0.5.0 in-process plugin API and the extended
+Built against the SDK v0.5.2 in-process plugin API and the extended
 [ifunny-go](https://github.com/open-ifunny/ifunny-go) client.
 
 ## Loading
@@ -75,10 +75,13 @@ producers and lookups but **not** the chat resources.
 ## Rate limiting and cutoffs
 
 `per-minute` and `stop-after` are **host-owned** block attributes under SDK
-v0.5.0 — set them on any producer or consumer block and the host enforces
-them; resources here do not declare them. The one exception is
-`ifunny-chat-listen`, which declares its own `stop-after` to tear down its
-live websocket subscription cleanly (a live subscription has no natural end).
+v0.5.2 — set them on any producer or consumer block and the host enforces
+them; resources here do not declare them. This includes the live-subscription
+chat resources (`ifunny-chat-listen`, `ifunny-chat-invites`): the host's
+`flow.Producer` wrapper cancels their ctx at the cutoff and the loops
+unsubscribe cleanly via `ctx.Done`. Requires a psyduck host with
+[gastrodon/psyduck#29](https://github.com/gastrodon/psyduck/pull/29) — older
+hosts leave the websocket pinned open past the cutoff.
 
 ## The discovery graph
 
@@ -98,9 +101,10 @@ users, or rooms. From there every step points you at more entities:
 Every *person* you turn up is a fresh starting point, so the graph keeps
 feeding itself: posts → people → their posts → their commenters → … The
 `ifunny-author` step is the glue — it turns a post, comment, or chat message
-into the `{id, nick}` of the person behind it. The `ifunny-lookup-*` steps do
-the opposite of discovery: they swap a lightweight reference (just an id or a
-channel name) for the full object when you need all of its fields.
+into a user reference (an `{id, nick}` json object, or a bare id string). The
+`ifunny-content` / `ifunny-user` / `ifunny-channel` steps do the opposite of
+discovery: they swap a lightweight reference (just an id or a channel name)
+for the full object when you need all of its fields.
 
 ### The map
 
@@ -121,7 +125,6 @@ flowchart LR
     Content -- ifunny-republishers --> User
     Content -- ifunny-author --> User
 
-    Comment -- ifunny-replies --> Comment
     Comment -- ifunny-author --> User
 
     User -- ifunny-timeline --> Content
@@ -149,24 +152,24 @@ per-resource "Chain in from" column below.
 
 ## Producers
 
-All producers emit JSON entities from the iFunny API. Options listed are in
-addition to the shared auth options (see [Authentication](#authentication)).
+All producers emit entities from the iFunny API, encoded via their `emit`
+field (default `"json"`). Options listed are in addition to the shared auth
+options (see [Authentication](#authentication)) and `emit`.
 
 | Resource | Options | Emits | Chain in from |
 | --- | --- | --- | --- |
 | `ifunny-feed` | `feed` | Content | — (seed) |
 | `ifunny-timeline` | `by-id`, `by-nick` (mutex) | Content | `User.id` or `User.nick` |
 | `ifunny-explore` | `compilation`, `kind` | Content / User / ChatChannel | — (seed) |
-| `ifunny-comments` | `content` | Comment | `Content.id` |
-| `ifunny-replies` | `content`, `comment` | Comment | `Comment.cid` + `Comment.id` |
+| `ifunny-comments` | `content` | Comment (forest: top-level then each comment's replies) | `Content.id` |
 | `ifunny-smiles` | `content` | User | `Content.id` |
 | `ifunny-republishers` | `content` | User | `Content.id` |
 | `ifunny-subscribers` | `user` | User | `User.id` |
 | `ifunny-subscriptions` | `user` | User | `User.id` |
 | `ifunny-channels` | `query` | ChatChannel | — (seed) |
 | `ifunny-chat-history` | `channel` | ChatEvent | `ChatChannel.name` |
-| `ifunny-chat-listen` | `channel`, `stop-after` | ChatEvent | `ChatChannel.name` |
-| `ifunny-chat-invites` | `stop-after` | ChatChannel | — (seed; `auth-bearer` only) |
+| `ifunny-chat-listen` | `channel` | ChatEvent | `ChatChannel.name` |
+| `ifunny-chat-invites` | — | ChatChannel | — (seed; `auth-bearer` only) |
 
 Notes:
 
@@ -180,36 +183,94 @@ Notes:
 - **`ifunny-explore`** `kind` is one of `content`, `user`, `chat` and must
   match the compilation (e.g. `content_top_today` with `content`,
   `users_top_overall` with `user`, `chats_popular_last_week` with `chat`).
+- **`ifunny-comments`** walks the comment forest depth-first: it emits
+  each top-level comment and then, before advancing, drains that
+  comment's replies (when `comment.num.replies > 0`). One stream
+  therefore carries the whole thread; there is no separate replies
+  producer.
 - **`ifunny-channels`** with an empty `query` (the default) yields trending
-  public channels; a non-empty `query` searches open channels.
+  public channels; a non-empty `query` searches open channels. Trending is
+  a one-shot fetch (no pagination), served through the same result-iterator
+  contract as the query search — see `IterChannelsTrending` in ifunny-go
+  v0.1.3+.
 - **`ifunny-chat-history`** backfills a channel's message history over the
-  chat websocket. **`ifunny-chat-listen`** streams live events; set its
-  `stop-after` to bound collection (0 listens until the process exits).
+  chat websocket. **`ifunny-chat-listen`** streams live events; set the
+  block-level `stop-after` to bound collection.
 - **`ifunny-chat-invites`** streams `ChatChannel`s the logged-in user is
   invited to. Requires `auth-bearer` (anonymous clients receive no
-  invites); shares `ifunny-chat-listen`'s locally-declared `stop-after`
-  semantics for the same reason (no natural end to a live subscription).
+  invites); bound the run with block-level `stop-after`.
 
 ## Transformers
 
-| Resource | Options | In → Out |
-| --- | --- | --- |
-| `ifunny-author` | — | Content / Comment / ChatEvent → `{id, nick}` |
-| `ifunny-tags` | — | Content → `{"tags": [...]}` |
-| `ifunny-lookup-content` | — | `{id}` → full Content |
-| `ifunny-lookup-user` | `by-id`, `by-nick` (mutex) | `{id}` or `{nick}` → full User |
-| `ifunny-lookup-channel` | — | `{name}` → full ChatChannel |
+Every transformer takes the shared auth surface (see
+[Authentication](#authentication)) plus two codec fields:
 
-- **`ifunny-author`** extracts the author reference from any entity that has
-  one — content (`creator`), comments and chat events (`user`) — emitting the
-  `{id, nick}` seed the user-oriented producers consume. Entities with no
-  author are dropped from the pipeline.
-- **`ifunny-tags`** lifts a post's tag list out of a Content record as
-  `{"tags": [...]}`. Posts with no tags are dropped. See
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `accept` | `"json"` | Encoding of records the transformer *decodes*. `"json"` = a rich object trusted only insofar as we find it useful (missing fields fall back to a fetch by the source's own terminal ref). `"string"` = a bare terminal ref of the source; a fetch is always required to obtain intermediates. |
+| `emit` | `"json"` | Encoding of records the transformer *emits*. `"json"` = the fully-hydrated target — always fetched fresh; incoming rich objects are never re-emitted verbatim. `"string"` = the target's terminal ref, no hydration. |
+
+| Resource | Options (beyond accept/emit) | S → T |
+| --- | --- | --- |
+| `ifunny-author` | `source` **(required)** — one of `"content"`, `"comment"`, `"chat"`; `emit-by = "id"` (default) or `"nick"` | Content / Comment / ChatEvent → User (S picked at bind by `source`) |
+| `ifunny-tags` | — | Content → `{"tags": [...]}` (json emit only) |
+| `ifunny-content` | — | Content ref → Content |
+| `ifunny-user` | `by = "id"` (default) or `"nick"` | User ref → User |
+| `ifunny-channel` | — | Channel ref → ChatChannel |
+
+`ifunny-author`'s `source` picks which entity type the transformer will
+decode — one transformer instance handles one source, matching the
+upstream producer's shape. `"comment"` and `"chat"` sources have no
+fetch-by-ref endpoint on the client surface, so `accept = "string"` is
+rejected at bind for them.
+
+`ifunny-author`'s `emit-by` and `ifunny-user`'s `by` name the user
+reference axis the transformer uses end-to-end: which field of the
+input shadow (`creator.id` vs `creator.nick`, or `id` vs `nick`) is
+read as the target ref, which endpoint hydrates the target
+(`compose.UserByID` vs `compose.UserByNick`), and — under sparse emit —
+what is written out. `"id"` and `"nick"` are the only valid values;
+anything else errors at bind time.
+
+Op count per accept×emit cell (S = source entity, T = target entity):
+
+| accept → emit | sparse (`string`) | rich (`json`) |
+| --- | --- | --- |
+| **sparse** (`string`) | S≠T: 1 fetch (source, extract target ref); by-nick recovery adds 1 fetch when the source lacks a nick. S=T: **bind error** — no-op. | S≠T: 1 fetch (source) + 1 fetch (target); recovery may short-circuit the target fetch. S=T: 1 fetch (target). |
+| **rich** (`json`) | 0 fetches on the fast path (target ref present in the shadow); by-nick recovery adds 1 fetch when the shadow has an id but no nick. | 1 fetch (target hydrated fresh); by-nick recovery short-circuits — the recovery fetch *is* the emitted target. |
+
+Bind-time errors:
+
+- `ifunny-tags` with `emit = "string"` — a tag list has no terminal ref.
+- `ifunny-author` with `source = "comment"` or `"chat"` and `accept =
+  "string"` — no single-item fetch endpoint exists for those sources.
+- `ifunny-content`, `ifunny-channel`, and `ifunny-user` (either `by`
+  mode) with `accept = emit = "string"` — identity, zero ops. The
+  reference axis (id or nick) stays consistent throughout the pipeline,
+  so a sparse→sparse pass is always a no-op.
+
+Runtime behavior notes:
+
+- **`ifunny-author`** extracts the author reference from the source
+  entity picked by `source` (required — no default): `"content"` reads
+  `creator`, `"comment"` reads `user`, `"chat"` reads `user` (with the
+  chat-event inner `"user"` id-tag). One instance handles one source.
+  `emit-by` (default `"id"`) picks the reference axis: `"id"` reads/emits the numeric user
+  id, `"nick"` reads/emits the nickname. Sparse emit produces the bare
+  id (or nick); rich emit fetches the full User keyed on the same
+  axis. Under `emit-by = "nick"`, if the source omits the nick but has
+  the id, the transformer recovers by fetching the user by id — and
+  reuses that fetch as the emit target on the rich-out cell. Entities
+  with no author are dropped from the pipeline.
+- **`ifunny-tags`** lifts a post's tag list as `{"tags": [...]}`. Posts with
+  no tags are dropped. Missing `tags` key on a rich input triggers a
+  content-by-id fallback fetch. See
   [Tag aggregation](#tag-aggregation) for how this feeds a tag census.
-- **`ifunny-lookup-*`** hydrate a lightweight reference into the full entity.
-  A not-found user (for `ifunny-lookup-user`) drops the datum rather than
-  failing the pipeline.
+- **`ifunny-content` / `ifunny-user` / `ifunny-channel`** hydrate (or
+  extract) a lightweight reference. A not-found target drops the datum
+  rather than failing the pipeline.
+- All five transformers require auth — the same
+  `auth-basic` / `auth-bearer` + `user-agent` surface producers take.
 
 ## Chaining across pipelines
 

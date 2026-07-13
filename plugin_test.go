@@ -2,10 +2,77 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/psyduck-etl/sdk"
 )
+
+// TestMain registers tiny codec factories so ifunny tests run without a
+// host binary. In production the psyduck host registers the real stdlib
+// codec chain; here we need:
+//
+//   - "json": end-to-end for the codec-dependent transformers/producers.
+//   - "string": the terminal-reference codec — its Decode returns a Go
+//     string of the input bytes, its Encode expects a string (anything
+//     else errors). bindEnrich dispatches on this shape.
+//
+// Anything else returns an error.
+func TestMain(m *testing.M) {
+	sdk.RegisterCodecs(func(spec string) (sdk.Codec, error) {
+		switch spec {
+		case "json":
+			return jsonCodec{}, nil
+		case "string":
+			return stringCodec{}, nil
+		}
+		return nil, fmt.Errorf("test codec factory: unknown spec %q", spec)
+	})
+	os.Exit(m.Run())
+}
+
+type jsonCodec struct{}
+
+func (jsonCodec) Decode(b []byte) (any, error) {
+	var v any
+	err := json.Unmarshal(b, &v)
+	return v, err
+}
+func (jsonCodec) Encode(v any) ([]byte, error) { return json.Marshal(v) }
+
+type stringCodec struct{}
+
+func (stringCodec) Decode(b []byte) (any, error) { return string(b), nil }
+func (stringCodec) Encode(v any) ([]byte, error) {
+	s, ok := v.(string)
+	if !ok {
+		return nil, fmt.Errorf("string codec: cannot encode %T", v)
+	}
+	return []byte(s), nil
+}
+
+// testAccept / testEmit build bound codec-config halves for driving
+// bindEnrich directly. They panic on an unknown spec — a test-authoring
+// bug, not a runtime condition.
+func testAccept(spec string) *acceptConfig {
+	c := &acceptConfig{Accept: spec}
+	if err := c.bind(); err != nil {
+		panic(err)
+	}
+	return c
+}
+
+func testEmit(spec string) *emitConfig {
+	c := &emitConfig{Emit: spec}
+	if err := c.bind(); err != nil {
+		panic(err)
+	}
+	return c
+}
 
 // expectedResource describes what the assembly must advertise for a
 // resource: its kind and the specs it must expose.
@@ -15,24 +82,23 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed"}},
-	"ifunny-timeline":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
-	"ifunny-explore":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind"}},
-	"ifunny-comments":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-replies":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "comment"}},
-	"ifunny-smiles":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-republishers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content"}},
-	"ifunny-subscribers":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
-	"ifunny-subscriptions":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user"}},
-	"ifunny-channels":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query"}},
-	"ifunny-chat-history":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel"}},
-	"ifunny-chat-listen":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "stop-after"}},
-	"ifunny-chat-invites":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "stop-after"}},
-	"ifunny-author":         {sdk.TRANSFORMER, nil},
-	"ifunny-tags":           {sdk.TRANSFORMER, nil},
-	"ifunny-lookup-content": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
-	"ifunny-lookup-user":    {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick"}},
-	"ifunny-lookup-channel": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent"}},
+	"ifunny-feed":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "emit"}},
+	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
+	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
+	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-subscriptions": {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-channels":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "emit"}},
+	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
+	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
+	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "emit"}},
+	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "source", "emit-by", "accept", "emit"}},
+	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
+	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -89,174 +155,487 @@ func TestClientSpecsAuthModes(t *testing.T) {
 	}
 }
 
-func TestExtractAuthor(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		body     string
-		wantID   string
-		wantNick string
-		wantOK   bool
+// TestAuthoredShadows pins the three source shadows against the
+// concrete json shapes ifunny-go produces. A library shape change (e.g.
+// a Comment field renamed away from json:"user") would break these
+// before any live pipeline hits a mis-extraction.
+func TestAuthoredShadows(t *testing.T) {
+	t.Run("content", func(t *testing.T) {
+		var s authoredContent
+		if err := json.Unmarshal([]byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u1" || s.AuthorNick() != "alice" {
+			t.Errorf("content shadow = (%q,%q), want (u1,alice)", s.AuthorID(), s.AuthorNick())
+		}
+	})
+	t.Run("comment", func(t *testing.T) {
+		var s authoredComment
+		if err := json.Unmarshal([]byte(`{"id":"c1","cid":"abc","user":{"id":"u2","nick":"bob"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u2" || s.AuthorNick() != "bob" {
+			t.Errorf("comment shadow = (%q,%q), want (u2,bob)", s.AuthorID(), s.AuthorNick())
+		}
+	})
+	t.Run("chat event", func(t *testing.T) {
+		// ChatEvent nests the author id under the inner json:"user"
+		// tag inside the outer "user" object.
+		var s authoredChatEvent
+		if err := json.Unmarshal([]byte(`{"id":"m1","text":"hi","user":{"user":"u3","nick":"carol"}}`), &s); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if s.AuthorID() != "u3" || s.AuthorNick() != "carol" {
+			t.Errorf("chat shadow = (%q,%q), want (u3,carol)", s.AuthorID(), s.AuthorNick())
+		}
+	})
+}
+
+// --- bindEnrich matrix coverage --------------------------------------
+//
+// A fake enrichPlan + counters lets these tests walk every cell of the
+// accept/emit matrix without a live client. Each test is one cell.
+
+// testEntity is the fake T that fakePlan's fetch returns.
+type testEntity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// enrichCounters records how often each plan primitive fired, so tests
+// can pin down "how many ops" per matrix cell.
+type enrichCounters struct {
+	extractCalls int
+	resolveCalls int
+	fetchCalls   int
+}
+
+// fakePlan builds an enrichPlan that reads its target ref off the
+// "target-ref" json field of the input record for the rich-in path and
+// echoes the sparse ref back for the sparse-in path (like a same-entity
+// transformer's identity resolve). fetch returns a copy of resolved
+// with ID = ref, or (nil, nil) when resolved is nil (not-found).
+//
+// If shortCircuit is true, extract returns a hydrated target alongside
+// the ref, exercising the rich-out short-circuit that skips fetch.
+func fakePlan(name string, c *enrichCounters, resolved *testEntity, shortCircuit bool) enrichPlan {
+	return enrichPlan{
+		name: name,
+		extract: func(data []byte) (string, any, error) {
+			c.extractCalls++
+			var s struct {
+				TargetRef string `json:"target-ref"`
+			}
+			if err := json.Unmarshal(data, &s); err != nil {
+				return "", nil, err
+			}
+			if s.TargetRef == "" {
+				return "", nil, nil
+			}
+			if shortCircuit && resolved != nil {
+				out := *resolved
+				out.ID = s.TargetRef
+				return s.TargetRef, &out, nil
+			}
+			return s.TargetRef, nil, nil
+		},
+		resolve: func(ref string) (string, any, error) {
+			c.resolveCalls++
+			return ref, nil, nil
+		},
+		fetch: func(ref string) (any, error) {
+			c.fetchCalls++
+			if resolved == nil {
+				return nil, nil
+			}
+			out := *resolved
+			out.ID = ref
+			return &out, nil
+		},
+	}
+}
+
+func mustBind(t *testing.T, accept, emit string, plan enrichPlan) sdk.Transformer {
+	t.Helper()
+	tr, err := bindEnrich(testAccept(accept), testEmit(emit), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	return tr
+}
+
+// sparse in + sparse out: resolve echoes the ref through; no extract,
+// no fetch.
+func TestBindEnrichSparseIn_SparseOut(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "string", "string", fakePlan("test", c, nil, false))
+
+	b, err := tr([]byte("xyz"))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if string(b) != "xyz" {
+		t.Errorf("out = %q, want xyz", b)
+	}
+	if c.resolveCalls != 1 || c.fetchCalls != 0 || c.extractCalls != 0 {
+		t.Errorf("calls = %+v, want resolve=1 fetch=0 extract=0", *c)
+	}
+}
+
+// sparse in + rich out: resolve then fetch.
+func TestBindEnrichSparseIn_RichOut(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "string", "json", fakePlan("test", c, &testEntity{Name: "resolved"}, false))
+
+	b, err := tr([]byte("xyz"))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	got := new(testEntity)
+	if err := json.Unmarshal(b, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ID != "xyz" || got.Name != "resolved" {
+		t.Errorf("out = %+v, want id=xyz name=resolved", got)
+	}
+	if c.resolveCalls != 1 || c.fetchCalls != 1 {
+		t.Errorf("calls = %+v, want resolve=1 fetch=1", *c)
+	}
+}
+
+// rich in + sparse out: 0 API ops. Target ref is read from the shadow
+// and emitted directly.
+func TestBindEnrichRichIn_SparseOut(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "json", "string", fakePlan("test", c, nil, false))
+
+	b, err := tr([]byte(`{"target-ref":"abc","other":"ignored"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if string(b) != "abc" {
+		t.Errorf("out = %q, want abc", b)
+	}
+	if c.extractCalls != 1 || c.resolveCalls != 0 || c.fetchCalls != 0 {
+		t.Errorf("calls = %+v, want extract=1 resolve=0 fetch=0", *c)
+	}
+}
+
+// rich in + rich out: extract T's ref, then fetch fresh. The emit
+// doctrine forbids returning stale rich objects verbatim.
+func TestBindEnrichRichIn_RichOut(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
+
+	b, err := tr([]byte(`{"target-ref":"abc","name":"stale-cache"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	got := new(testEntity)
+	if err := json.Unmarshal(b, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Name != "fresh" {
+		t.Errorf("out.name = %q, want fresh (rich→rich must refetch)", got.Name)
+	}
+	if c.fetchCalls != 1 {
+		t.Errorf("fetch = %d, want 1", c.fetchCalls)
+	}
+}
+
+// rich in + rich out with short-circuit: extract already hydrated the
+// target (by-nick recovery flow); fetch must not fire.
+func TestBindEnrichRichIn_RichOut_ShortCircuit(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "recovered"}, true))
+
+	b, err := tr([]byte(`{"target-ref":"abc"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	got := new(testEntity)
+	if err := json.Unmarshal(b, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Name != "recovered" {
+		t.Errorf("out.name = %q, want recovered (short-circuit)", got.Name)
+	}
+	if c.fetchCalls != 0 {
+		t.Errorf("fetch = %d, want 0 (short-circuit skips fetch)", c.fetchCalls)
+	}
+}
+
+// Rich input whose extract returns an empty ref drops (no author on the
+// record; nothing to emit).
+func TestBindEnrichRichIn_EmptyRefDrops(t *testing.T) {
+	c := &enrichCounters{}
+	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
+
+	b, err := tr([]byte(`{"other":"foo"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if b != nil {
+		t.Errorf("out = %q, want nil (empty ref drops)", b)
+	}
+	if c.fetchCalls != 0 {
+		t.Errorf("fetch = %d, want 0", c.fetchCalls)
+	}
+}
+
+// A fetch that returns (nil, nil) — the not-found convention — drops
+// the record.
+func TestBindEnrichNotFoundDrops(t *testing.T) {
+	c := &enrichCounters{}
+	// resolved == nil → fetch returns (nil, nil).
+	tr := mustBind(t, "string", "json", fakePlan("test", c, nil, false))
+
+	b, err := tr([]byte("missing"))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if b != nil {
+		t.Errorf("out = %q, want nil (not-found drops)", b)
+	}
+}
+
+// A plan with resolve = nil and accept = "string" errors at bind: the
+// unfetchable-source cell (source = comment | chat on ifunny-author).
+func TestBindEnrichUnfetchableSparseErrors(t *testing.T) {
+	plan := enrichPlan{
+		name:    "test",
+		extract: func([]byte) (string, any, error) { return "", nil, nil },
+		fetch:   func(string) (any, error) { return nil, nil },
+	}
+	_, err := bindEnrich(testAccept("string"), testEmit("json"), plan)
+	if err == nil {
+		t.Fatal("expected bind error for accept=string with nil resolve")
+	}
+}
+
+// A plan with resolve = nil is fine on rich-in cells.
+func TestBindEnrichUnfetchableRichOK(t *testing.T) {
+	plan := enrichPlan{
+		name: "test",
+		extract: func(data []byte) (string, any, error) {
+			var s struct {
+				TargetRef string `json:"target-ref"`
+			}
+			if err := json.Unmarshal(data, &s); err != nil {
+				return "", nil, err
+			}
+			return s.TargetRef, nil, nil
+		},
+		fetch: func(string) (any, error) { return nil, nil },
+	}
+	tr, err := bindEnrich(testAccept("json"), testEmit("string"), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	b, err := tr([]byte(`{"target-ref":"abc"}`))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if string(b) != "abc" {
+		t.Errorf("out = %q, want abc", b)
+	}
+}
+
+// An extract that returns an error surfaces per-record (SDK v0.5.2
+// per-record transformer contract).
+func TestBindEnrichExtractErrorPropagates(t *testing.T) {
+	sentinel := errors.New("shadow decode failed")
+	plan := enrichPlan{
+		name:    "test",
+		extract: func([]byte) (string, any, error) { return "", nil, sentinel },
+		fetch:   func(string) (any, error) { return nil, nil },
+	}
+	tr, err := bindEnrich(testAccept("json"), testEmit("json"), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+	if _, err := tr([]byte(`{}`)); !errors.Is(err, sentinel) {
+		t.Errorf("err = %v, want sentinel", err)
+	}
+}
+
+// testParser wraps a map into an sdk.Parser via mapstructure, so tests
+// can drive transformer factories without an HCL host. TagName "psy"
+// mirrors production; Squash flattens embedded config halves
+// (authConfig / acceptConfig / emitConfig) so their fields sit at the
+// top level of the values map, matching how the host parses HCL blocks.
+func testParser(values map[string]any) sdk.Parser {
+	return func(dst any) error {
+		dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+			TagName: "psy",
+			Squash:  true,
+			Result:  dst,
+		})
+		if err != nil {
+			return err
+		}
+		return dec.Decode(values)
+	}
+}
+
+// withAuth returns a values map preloaded with a literal auth-basic token
+// and android user-agent block — clientFor accepts these without any
+// network call (see client.go: literal auth-basic hits MakeClientBasic
+// directly), which is what makes bind-level tests here safe. extra fields
+// overlay onto the base.
+func withAuth(extra map[string]any) map[string]any {
+	m := map[string]any{
+		"auth-basic": "test-token",
+		"user-agent": map[string]any{
+			"device":         "android",
+			"device-version": "14",
+		},
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestParseUserBy covers the new one-arg signature: caller wraps its own
+// resource-name prefix around the returned error.
+func TestParseUserBy(t *testing.T) {
+	cases := []struct {
+		in      string
+		byNick  bool
+		wantErr bool
 	}{
-		{
-			name:     "content creator",
-			body:     `{"id":"abc","creator":{"id":"u1","nick":"alice"}}`,
-			wantID:   "u1",
-			wantNick: "alice",
-			wantOK:   true,
-		},
-		{
-			name:     "comment user",
-			body:     `{"id":"c1","cid":"abc","user":{"id":"u2","nick":"bob"}}`,
-			wantID:   "u2",
-			wantNick: "bob",
-			wantOK:   true,
-		},
-		{
-			name:     "chat event user",
-			body:     `{"id":"m1","text":"hi","user":{"user":"u3","nick":"carol"}}`,
-			wantID:   "u3",
-			wantNick: "carol",
-			wantOK:   true,
-		},
-		{
-			name:   "no author",
-			body:   `{"id":"abc"}`,
-			wantOK: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			author, ok, err := extractAuthor([]byte(tc.body))
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+		{"id", false, false},
+		{"nick", true, false},
+		{"bogus", false, true},
+		{"", false, true},
+	}
+	for _, tc := range cases {
+		name := tc.in
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			got, err := parseUserBy(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr=%v", err, tc.wantErr)
 			}
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
-			}
-			if !tc.wantOK {
-				return
-			}
-			if author.ID != tc.wantID || author.Nick != tc.wantNick {
-				t.Errorf("author = %+v, want id=%q nick=%q", author, tc.wantID, tc.wantNick)
+			if got != tc.byNick {
+				t.Errorf("byNick = %v, want %v", got, tc.byNick)
 			}
 		})
 	}
 }
 
-// The chat event nests its author id under a "user" json key inside a
-// "user" object; extractAuthor must read that shape. This guards the
-// specific mapping ChatEvent uses.
-func TestExtractAuthorChatEventShape(t *testing.T) {
-	author, ok, err := extractAuthor([]byte(`{"user":{"user":"u9","nick":"dan"}}`))
-	if err != nil || !ok {
-		t.Fatalf("extractAuthor ok=%v err=%v", ok, err)
-	}
-	if author.ID != "u9" {
-		t.Errorf("id = %q, want u9", author.ID)
-	}
-}
-
-func TestAuthorTransformer(t *testing.T) {
-	transform, err := authorTransformer(nil)
-	if err != nil {
-		t.Fatalf("build transformer: %v", err)
-	}
-
-	out, err := transform([]byte(`{"id":"abc","creator":{"id":"u1","nick":"alice"}}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
-	}
-
-	got := new(authorRef)
-	if err := json.Unmarshal(out, got); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
-	}
-	if got.ID != "u1" || got.Nick != "alice" {
-		t.Errorf("output = %+v, want id=u1 nick=alice", got)
-	}
-
-	// An entity with no author is dropped from the pipeline.
-	dropped, err := transform([]byte(`{"id":"abc"}`))
-	if err != nil {
-		t.Fatalf("transform no-author: %v", err)
-	}
-	if dropped != nil {
-		t.Errorf("expected nil output for author-less entity, got %s", dropped)
-	}
-}
-
+// TestTagsTransformer exercises the bind-level refusals and the per-record
+// paths that don't reach the iFunny API (rich input carrying tags or an
+// unfetchable no-id map). The id-fallback path is intentionally not tested
+// here — it calls GetContent, which is a network operation.
 func TestTagsTransformer(t *testing.T) {
-	transform, err := tagsTransformer(nil)
-	if err != nil {
-		t.Fatalf("build transformer: %v", err)
-	}
-
-	out, err := transform([]byte(`{"id":"abc","tags":["funny","cats","meme"],"type":"pic"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
-	}
-
-	got := new(struct {
-		Tags []string `json:"tags"`
+	t.Run("EmitStringRejected", func(t *testing.T) {
+		_, err := tagsTransformer(testParser(withAuth(map[string]any{"emit": "string"})))
+		if err == nil || !strings.Contains(err.Error(), "ifunny-tags") {
+			t.Fatalf("expected ifunny-tags bind error, got %v", err)
+		}
 	})
-	if err := json.Unmarshal(out, got); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
-	}
-	if len(got.Tags) != 3 || got.Tags[0] != "funny" || got.Tags[2] != "meme" {
-		t.Errorf("tags = %v, want [funny cats meme]", got.Tags)
-	}
 
-	// A post with no tags is dropped.
-	for _, body := range []string{`{"id":"abc"}`, `{"id":"abc","tags":[]}`} {
-		dropped, err := transform([]byte(body))
+	t.Run("RichInputTagsPresent", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
 		if err != nil {
-			t.Fatalf("transform %s: %v", body, err)
+			t.Fatalf("bind: %v", err)
 		}
-		if dropped != nil {
-			t.Errorf("expected nil output for %s, got %s", body, dropped)
+		out, err := tr([]byte(`{"tags":["cats","memes"]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
 		}
-	}
-}
-
-func TestLookup(t *testing.T) {
-	type entity struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-
-	var gotID string
-	transform := lookup(func(id string) (any, error) {
-		gotID = id
-		return entity{ID: id, Name: "resolved"}, nil
+		var got tagsEnvelope
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if want := []string{"cats", "memes"}; !equalStrings(got.Tags, want) {
+			t.Errorf("tags = %v, want %v", got.Tags, want)
+		}
 	})
 
-	out, err := transform([]byte(`{"id":"xyz","nick":"ignored"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
-	}
-	if gotID != "xyz" {
-		t.Errorf("looker got id %q, want xyz", gotID)
-	}
-
-	got := new(entity)
-	if err := json.Unmarshal(out, got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got.Name != "resolved" {
-		t.Errorf("resolved name = %q, want resolved", got.Name)
-	}
-}
-
-// A looker returning nil (e.g. a not-found lookup) drops the datum.
-func TestLookupNilDropsDatum(t *testing.T) {
-	transform := lookup(func(string) (any, error) {
-		return nil, nil
+	t.Run("RichInputMixedTypesSkipsNonStrings", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		out, err := tr([]byte(`{"tags":["a", 1, "b", null, "c"]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
+		}
+		var got tagsEnvelope
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if want := []string{"a", "b", "c"}; !equalStrings(got.Tags, want) {
+			t.Errorf("tags = %v, want %v", got.Tags, want)
+		}
 	})
 
-	out, err := transform([]byte(`{"id":"missing"}`))
-	if err != nil {
-		t.Fatalf("transform: %v", err)
+	t.Run("RichInputEmptyTagsDrops", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		out, err := tr([]byte(`{"tags":[]}`))
+		if err != nil {
+			t.Fatalf("tr: %v", err)
+		}
+		if out != nil {
+			t.Errorf("out = %s, want nil (drop)", out)
+		}
+	})
+
+	t.Run("RichInputNoTagsNoIDErrors", func(t *testing.T) {
+		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		if err != nil {
+			t.Fatalf("bind: %v", err)
+		}
+		_, err = tr([]byte(`{"other":"value"}`))
+		if err == nil || !strings.Contains(err.Error(), "no id field") {
+			t.Errorf("err = %v, want no-id fallback error", err)
+		}
+	})
+}
+
+// TestAuthorTransformerBindErrors covers bind-time refusals only — every
+// case here fails before authorTransformer's returned closure runs, so no
+// API call is possible.
+func TestAuthorTransformerBindErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		values map[string]any
+	}{
+		{"SourceMissing", nil},
+		{"SourceUnknown", map[string]any{"source": "post"}},
+		{"SourceCommentAcceptStringRejected", map[string]any{"source": "comment", "accept": "string"}},
+		{"SourceChatAcceptStringRejected", map[string]any{"source": "chat", "accept": "string"}},
+		{"EmitByBogus", map[string]any{"source": "content", "emit-by": "email"}},
 	}
-	if out != nil {
-		t.Errorf("expected nil output for nil lookup, got %s", out)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := authorTransformer(testParser(withAuth(tc.values)))
+			if err == nil {
+				t.Fatalf("expected bind error, got nil")
+			}
+			if !strings.Contains(err.Error(), "ifunny-author") {
+				t.Errorf("error message missing ifunny-author prefix: %v", err)
+			}
+		})
 	}
 }

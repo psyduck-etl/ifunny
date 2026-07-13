@@ -9,7 +9,7 @@ func main() {}
 
 // Plugin is the ABI entrypoint the psyduck host looks up in the compiled
 // plugin object. It returns the full set of iFunny content-discovery
-// resources assembled under the SDK v0.5.0 in-process plugin.
+// resources assembled under the SDK v0.5.2 in-process plugin.
 func Plugin() sdk.Plugin {
 	return sdk.NewInProc("ifunny",
 		// --- content producers ---
@@ -17,12 +17,15 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-feed",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceFeed,
-			Spec: specs(&sdk.Spec{
-				Name:        "feed",
-				Description: "feed to pull content from, e.g. featured or collective",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "feed",
+					Description: "feed to pull content from, e.g. featured or collective",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-timeline",
@@ -41,6 +44,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Default:     "",
 				},
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
@@ -60,6 +64,7 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
+				emitSpec(),
 			),
 		},
 
@@ -68,30 +73,14 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-comments",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceComments,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull comments from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
-		},
-		&sdk.Resource{
-			Name:            "ifunny-replies",
-			Kinds:           sdk.PRODUCER,
-			ProvideProducer: produceReplies,
 			Spec: specs(
 				&sdk.Spec{
 					Name:        "content",
-					Description: "content id the comment lives on",
+					Description: "content id to pull comments from",
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				&sdk.Spec{
-					Name:        "comment",
-					Description: "comment id to pull replies from",
-					Type:        sdk.TypeString,
-					Required:    true,
-				},
+				emitSpec(),
 			),
 		},
 
@@ -100,45 +89,57 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-smiles",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSmiles,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull smiling users from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "content",
+					Description: "content id to pull smiling users from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-republishers",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceRepublishers,
-			Spec: specs(&sdk.Spec{
-				Name:        "content",
-				Description: "content id to pull republishing users from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "content",
+					Description: "content id to pull republishing users from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-subscribers",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSubscribers,
-			Spec: specs(&sdk.Spec{
-				Name:        "user",
-				Description: "user id to pull subscribers from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "user",
+					Description: "user id to pull subscribers from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-subscriptions",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceSubscriptions,
-			Spec: specs(&sdk.Spec{
-				Name:        "user",
-				Description: "user id to pull subscriptions from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "user",
+					Description: "user id to pull subscriptions from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 
 		// --- chat producers ---
@@ -146,23 +147,29 @@ func Plugin() sdk.Plugin {
 			Name:            "ifunny-channels",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChannels,
-			Spec: specs(&sdk.Spec{
-				Name:        "query",
-				Description: "search query for open channels; empty yields trending channels",
-				Type:        sdk.TypeString,
-				Default:     "",
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "query",
+					Description: "search query for open channels; empty yields trending channels",
+					Type:        sdk.TypeString,
+					Default:     "",
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-history",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatHistory,
-			Spec: specs(&sdk.Spec{
-				Name:        "channel",
-				Description: "channel name to pull message history from",
-				Type:        sdk.TypeString,
-				Required:    true,
-			}),
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "channel",
+					Description: "channel name to pull message history from",
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-listen",
@@ -175,24 +182,14 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
-				&sdk.Spec{
-					Name:        "stop-after",
-					Description: "stop after n live events; 0 listens until the process exits",
-					Type:        sdk.TypeInt,
-					Default:     0,
-				},
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
 			Name:            "ifunny-chat-invites",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatInvites,
-			Spec: specs(&sdk.Spec{
-				Name:        "stop-after",
-				Description: "stop after n received invites; 0 listens until the process exits",
-				Type:        sdk.TypeInt,
-				Default:     0,
-			}),
+			Spec:            specs(emitSpec()),
 		},
 
 		// --- transformers ---
@@ -200,42 +197,55 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-author",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: authorTransformer,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "source",
+					Description: `which source entity type the transformer decodes, one of: "content", "comment", or "chat". "comment" and "chat" cannot use accept = "string" — no fetch-by-ref endpoint exists for them.`,
+					Type:        sdk.TypeString,
+					Required:    true,
+				},
+				&sdk.Spec{
+					Name:        "emit-by",
+					Description: `which author reference to emit and fetch by, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
+					Type:        sdk.TypeString,
+					Default:     "id",
+				},
+				acceptSpec(),
+				emitSpec(),
+			),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-content",
+			Name:               "ifunny-content",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupContent,
-			Spec:               clientSpecs(),
+			ProvideTransformer: contentTransformer,
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-user",
+			Name:               "ifunny-user",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupUser,
+			ProvideTransformer: userTransformer,
 			Spec: specs(
 				&sdk.Spec{
-					Name:        "by-id",
-					Description: "look up by the input's id field; mutually exclusive with by-nick",
-					Type:        sdk.TypeBool,
-					Default:     false,
+					Name:        "by",
+					Description: `which user reference to key on, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
+					Type:        sdk.TypeString,
+					Default:     "id",
 				},
-				&sdk.Spec{
-					Name:        "by-nick",
-					Description: "look up by the input's nick field; mutually exclusive with by-id",
-					Type:        sdk.TypeBool,
-					Default:     false,
-				},
+				acceptSpec(),
+				emitSpec(),
 			),
 		},
 		&sdk.Resource{
-			Name:               "ifunny-lookup-channel",
+			Name:               "ifunny-channel",
 			Kinds:              sdk.TRANSFORMER,
-			ProvideTransformer: lookupChannel,
-			Spec:               clientSpecs(),
+			ProvideTransformer: channelTransformer,
+			Spec:               specs(acceptSpec(), emitSpec()),
 		},
 	)
 }
