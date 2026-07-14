@@ -1,15 +1,16 @@
 package main
 
-import "github.com/psyduck-etl/sdk"
+import (
+	"github.com/psyduck-etl/sdk"
+	"github.com/psyduck-etl/sdk/rpc"
+)
 
-// main is unused: the host loads this package as a -buildmode=plugin shared
-// object and calls Plugin directly. It exists only so a plain `go build`
-// (the portable CI check) can link the main package.
-func main() {}
+// main serves the plugin over gRPC to the psyduck host that launched this
+// binary as a subprocess.
+func main() { rpc.Serve(Plugin()) }
 
-// Plugin is the ABI entrypoint the psyduck host looks up in the compiled
-// plugin object. It returns the full set of iFunny content-discovery
-// resources assembled under the SDK v0.5.2 in-process plugin.
+// Plugin returns the full set of iFunny content-discovery resources
+// assembled as an in-process plugin, which main serves to the host.
 func Plugin() sdk.Plugin {
 	return sdk.NewInProc("ifunny",
 		// --- content producers ---
