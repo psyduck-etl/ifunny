@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/psyduck-etl/sdk"
@@ -264,13 +265,48 @@ func mustBind(t *testing.T, accept, emit string, plan enrichPlan) sdk.Transforme
 	return tr
 }
 
+// runOne feeds a single record through tr under the channel-based
+// Transformer contract, mirroring the old 1→1 call shape for tests: the
+// emitted record (nil = dropped) and the first reported error.
+func runOne(t *testing.T, tr sdk.Transformer, data []byte) ([]byte, error) {
+	t.Helper()
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 1)
+	errs := make(chan error, 1)
+	in <- data
+	close(in)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tr(t.Context(), in, out, errs)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("transformer hung on a single record")
+	}
+
+	var b []byte
+	select {
+	case b = <-out:
+	default:
+	}
+	var err error
+	select {
+	case err = <-errs:
+	default:
+	}
+	return b, err
+}
+
 // sparse in + sparse out: resolve echoes the ref through; no extract,
 // no fetch.
 func TestBindEnrichSparseIn_SparseOut(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "string", "string", fakePlan("test", c, nil, false))
 
-	b, err := tr([]byte("xyz"))
+	b, err := runOne(t, tr, []byte("xyz"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -287,7 +323,7 @@ func TestBindEnrichSparseIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "string", "json", fakePlan("test", c, &testEntity{Name: "resolved"}, false))
 
-	b, err := tr([]byte("xyz"))
+	b, err := runOne(t, tr, []byte("xyz"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -309,7 +345,7 @@ func TestBindEnrichRichIn_SparseOut(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "json", "string", fakePlan("test", c, nil, false))
 
-	b, err := tr([]byte(`{"target-ref":"abc","other":"ignored"}`))
+	b, err := runOne(t, tr, []byte(`{"target-ref":"abc","other":"ignored"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -327,7 +363,7 @@ func TestBindEnrichRichIn_RichOut(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
 
-	b, err := tr([]byte(`{"target-ref":"abc","name":"stale-cache"}`))
+	b, err := runOne(t, tr, []byte(`{"target-ref":"abc","name":"stale-cache"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -349,7 +385,7 @@ func TestBindEnrichRichIn_RichOut_ShortCircuit(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "recovered"}, true))
 
-	b, err := tr([]byte(`{"target-ref":"abc"}`))
+	b, err := runOne(t, tr, []byte(`{"target-ref":"abc"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -371,7 +407,7 @@ func TestBindEnrichRichIn_EmptyRefDrops(t *testing.T) {
 	c := &enrichCounters{}
 	tr := mustBind(t, "json", "json", fakePlan("test", c, &testEntity{Name: "fresh"}, false))
 
-	b, err := tr([]byte(`{"other":"foo"}`))
+	b, err := runOne(t, tr, []byte(`{"other":"foo"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -390,7 +426,7 @@ func TestBindEnrichNotFoundDrops(t *testing.T) {
 	// resolved == nil → fetch returns (nil, nil).
 	tr := mustBind(t, "string", "json", fakePlan("test", c, nil, false))
 
-	b, err := tr([]byte("missing"))
+	b, err := runOne(t, tr, []byte("missing"))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -432,7 +468,7 @@ func TestBindEnrichUnfetchableRichOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bindEnrich: %v", err)
 	}
-	b, err := tr([]byte(`{"target-ref":"abc"}`))
+	b, err := runOne(t, tr, []byte(`{"target-ref":"abc"}`))
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -441,8 +477,8 @@ func TestBindEnrichUnfetchableRichOK(t *testing.T) {
 	}
 }
 
-// An extract that returns an error surfaces per-record (SDK v0.5.2
-// per-record transformer contract).
+// An extract that returns an error surfaces per-record on errs, and the
+// record drops without halting the stage.
 func TestBindEnrichExtractErrorPropagates(t *testing.T) {
 	sentinel := errors.New("shadow decode failed")
 	plan := enrichPlan{
@@ -454,7 +490,7 @@ func TestBindEnrichExtractErrorPropagates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bindEnrich: %v", err)
 	}
-	if _, err := tr([]byte(`{}`)); !errors.Is(err, sentinel) {
+	if _, err := runOne(t, tr, []byte(`{}`)); !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want sentinel", err)
 	}
 }
@@ -556,7 +592,7 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		out, err := tr([]byte(`{"tags":["cats","memes"]}`))
+		out, err := runOne(t, tr, []byte(`{"tags":["cats","memes"]}`))
 		if err != nil {
 			t.Fatalf("tr: %v", err)
 		}
@@ -574,7 +610,7 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		out, err := tr([]byte(`{"tags":["a", 1, "b", null, "c"]}`))
+		out, err := runOne(t, tr, []byte(`{"tags":["a", 1, "b", null, "c"]}`))
 		if err != nil {
 			t.Fatalf("tr: %v", err)
 		}
@@ -592,7 +628,7 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		out, err := tr([]byte(`{"tags":[]}`))
+		out, err := runOne(t, tr, []byte(`{"tags":[]}`))
 		if err != nil {
 			t.Fatalf("tr: %v", err)
 		}
@@ -606,7 +642,7 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		_, err = tr([]byte(`{"other":"value"}`))
+		_, err = runOne(t, tr, []byte(`{"other":"value"}`))
 		if err == nil || !strings.Contains(err.Error(), "no id field") {
 			t.Errorf("err = %v, want no-id fallback error", err)
 		}

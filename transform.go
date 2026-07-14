@@ -153,16 +153,16 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 	}
 
 	if emit.sparse() {
-		return func(data []byte) ([]byte, error) {
+		return sdk.Map(func(data []byte) ([]byte, error) {
 			ref, _, err := frontHalf(data)
 			if err != nil || ref == "" {
 				return nil, err
 			}
 			return emit.Encode(ref)
-		}, nil
+		}), nil
 	}
 
-	return func(data []byte) ([]byte, error) {
+	return sdk.Map(func(data []byte) ([]byte, error) {
 		ref, target, err := frontHalf(data)
 		if err != nil {
 			return nil, err
@@ -177,7 +177,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 			}
 		}
 		return emit.Encode(target)
-	}, nil
+	}), nil
 }
 
 // authorTransformer builds the ifunny-author transformer. It maps a
@@ -371,9 +371,9 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 // A post with no tags is dropped (an empty tag set contributes nothing
 // to a census). Requires auth (fetches are possible on either accept).
 //
-// Note the shape: this emits the whole list as one record, because a
-// psyduck transformer is strictly one-in-one-out. Per-tag consumers
-// therefore need an explode step upstream of them — see the README.
+// Note the shape: this emits the whole list as one record. Per-tag
+// consumers therefore need an explode step upstream of them — see the
+// README.
 //
 // Example:
 //
@@ -426,7 +426,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return content.Tags, nil
 	}
 
-	return func(data []byte) ([]byte, error) {
+	return sdk.Map(func(data []byte) ([]byte, error) {
 		decoded, err := config.acceptConfig.Decode(data)
 		if err != nil {
 			return nil, err
@@ -468,7 +468,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			return nil, nil // drop
 		}
 		return config.emitConfig.Encode(tagsEnvelope{Tags: tags})
-	}, nil
+	}), nil
 }
 
 // contentTransformer builds the ifunny-content transformer. It hydrates

@@ -308,16 +308,15 @@ feed a queue of tags worth searching. The store side is the
 One wrinkle worth knowing up front: both `mysql-table` and `mysql-filter`
 operate on **one scalar field per record** (`fields = ["tag"]` → a record
 shaped `{"tag": "cats"}`). `ifunny-tags` emits the whole list as one record
-(`{"tags": [...]}`), because a psyduck transformer is strictly one-in-one-out
-and can't fan a post's N tags into N records. So between `ifunny-tags` and the
-per-tag mysql stages you need an **explode** step — one record per tag — which
-psyduck has no primitive for yet. Options, cheapest first:
+(`{"tags": [...]}`) and doesn't fan a post's N tags into N records. So between
+`ifunny-tags` and the per-tag mysql stages you need an **explode** step — one
+record per tag — which psyduck has no primitive for yet. Options, cheapest
+first:
 
 1. Store the array whole (`mysql-table` with a JSON/text column) and aggregate
    counts in SQL (`GROUP BY` over an unnested tags column).
-2. Add a fan-out capability to the psyduck core (a transformer that may emit
-   many records, or a dedicated explode block) — this is the general fix and
-   would live in `gastrodon/psyduck`.
+2. An explode transformer (the channel-based Transformer contract supports
+   1-to-many, so this is now just a stdlib/plugin feature, not a core change).
 
 Instance **counts** ("how many times a tag has been seen") likewise aren't what
 `mysql-table` records today — `INSERT IGNORE` tracks distinct existence, not a
