@@ -1,6 +1,7 @@
 // Package main is the iFunny data-source plugin for the psyduck-etl host.
-// It compiles as a -buildmode=plugin shared object; the host loads it and
-// looks up [Plugin] for the registered producers and transformers.
+// It builds as a plain executable; the host launches it as a gRPC
+// subprocess (sdk/rpc) and calls [Plugin] to serve the registered
+// producers and transformers over that connection.
 //
 // The plugin exposes iFunny's content graph — posts, comments, users, and
 // public chat channels — as psyduck resources that a discovery pipeline can

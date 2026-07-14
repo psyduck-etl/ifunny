@@ -8,7 +8,8 @@ feed into itself: user profiles yield posts, posts yield comments, posts and
 comments yield the users who interacted with them, and those users yield more
 profiles.
 
-Built against the SDK v0.5.2 in-process plugin API and the extended
+Built against the [psyduck-etl/sdk](https://github.com/psyduck-etl/sdk) gRPC
+plugin API (see `go.mod` for the exact version) and the extended
 [ifunny-go](https://github.com/open-ifunny/ifunny-go) client.
 
 ## Loading
@@ -19,10 +20,10 @@ plugin "ifunny" {
 }
 ```
 
-`psyduck init` fetches and builds the plugin as a `-buildmode=plugin` shared
-object; `psyduck run` loads it. The plugin and the host must be built with the
-same Go toolchain and matching `psyduck-etl/sdk` version — this is a hard
-constraint of Go plugins.
+`psyduck init` fetches and builds the plugin as a plain executable;
+`psyduck run` launches it as a subprocess and speaks gRPC to it (`sdk/rpc`).
+No toolchain or dependency-graph matching between the plugin and the host is
+required — only wire-protocol compatibility (`rpc.Handshake.ProtocolVersion`).
 
 ## Authentication
 
@@ -329,8 +330,7 @@ database.
 ```sh
 go test ./...                       # assembly + pure-function tests
 go vet ./...
-go build ./...                      # portable link check
-go build -buildmode=plugin -o ifunny.so .   # against the host's Go toolchain
+go build -o ifunny .                # what `psyduck init` runs
 ```
 
 The tests cover the resource assembly (names, kinds, specs) and the
