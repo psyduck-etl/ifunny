@@ -115,4 +115,3 @@ func emitSpec() *sdk.Spec {
 		Default:     "json",
 	}
 }
-

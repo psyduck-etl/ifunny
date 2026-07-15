@@ -248,5 +248,61 @@ func Plugin() sdk.Plugin {
 			ProvideTransformer: channelTransformer,
 			Spec:               specs(acceptSpec(), emitSpec()),
 		},
+
+		// --- explode transformers ---
+		&sdk.Resource{
+			Name:               "ifunny-timeline-explode",
+			Kinds:              sdk.TRANSFORMER,
+			ProvideTransformer: timelineTransformer,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "by",
+					Description: `which user reference to key on, one of: "id" (numeric user id, default) or "nick" (user nickname)`,
+					Type:        sdk.TypeString,
+					Default:     "id",
+				},
+				&sdk.Spec{
+					Name:        "limit",
+					Description: "maximum number of content items to emit per input user (0 = no limit)",
+					Type:        sdk.TypeInt,
+					Default:     "0",
+				},
+				acceptSpec(),
+				emitSpec(),
+			),
+		},
+		&sdk.Resource{
+			Name:               "ifunny-comments-explode",
+			Kinds:              sdk.TRANSFORMER,
+			ProvideTransformer: commentsTransformer,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "max-depth",
+					Description: "maximum depth of comment nesting to emit (0 = top-level only, 1 = replies, -1 = unlimited, default)",
+					Type:        sdk.TypeInt,
+					Default:     "-1",
+				},
+				acceptSpec(),
+				emitSpec(),
+			),
+		},
+		&sdk.Resource{
+			Name:               "ifunny-interactions",
+			Kinds:              sdk.TRANSFORMER,
+			ProvideTransformer: interactionsTransformer,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "interactions",
+					Description: `list of user interactions to fan out, each of: "author", "smiles", "republishes", "comments"`,
+					Type:        sdk.TypeList,
+					Required:    true,
+					ElemType: &sdk.Spec{
+						Type: sdk.TypeString,
+					},
+				},
+				acceptSpec(),
+				emitSpec(),
+			),
+		},
 	)
 }

@@ -1,20 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
 	"github.com/open-ifunny/ifunny-go/compose"
 	"github.com/psyduck-etl/sdk"
 )
-
-// tagsEnvelope is the shape ifunny-tags emits: a Content's tag list
-// wrapped in {"tags": [...]}. Sparse emission isn't defined for tags —
-// a tag list has no terminal reference — and is rejected at bind time.
-type tagsEnvelope struct {
-	Tags []string `json:"tags"`
-}
 
 // authoredContent, authoredComment, and authoredChatEvent are shallow
 // shadows of the three source shapes ifunny-author accepts. Each keeps
@@ -359,7 +354,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 }
 
 // tagsTransformer builds the ifunny-tags transformer. It lifts a
-// Content's tag list, emitting {"tags": [...]}.
+// Content's tag list, emitting each tag as its own message (1→N shape).
 //
 // Matrix per record:
 //
@@ -371,9 +366,9 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 // A post with no tags is dropped (an empty tag set contributes nothing
 // to a census). Requires auth (fetches are possible on either accept).
 //
-// Note the shape: this emits the whole list as one record. Per-tag
-// consumers therefore need an explode step upstream of them — see the
-// README.
+// Prior implementation emitted {"tags": [...]} as a single record, requiring
+// downstream explode. Current implementation explodes internally, emitting
+// each tag string as its own record for direct composability.
 //
 // Example:
 //
@@ -426,49 +421,80 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return content.Tags, nil
 	}
 
-	return sdk.Map(func(data []byte) ([]byte, error) {
-		decoded, err := config.acceptConfig.Decode(data)
-		if err != nil {
-			return nil, err
-		}
-		var tags []string
-		switch v := decoded.(type) {
-		case string:
-			t, err := fetchTags(v)
-			if err != nil {
-				return nil, err
-			}
-			tags = t
-		case map[string]any:
-			if raw, ok := v["tags"]; ok {
-				list, _ := raw.([]any)
-				out := make([]string, 0, len(list))
-				for _, t := range list {
-					if s, ok := t.(string); ok {
-						out = append(out, s)
-					}
-				}
-				tags = out
-				break
-			}
-			contentID, ok := v["id"].(string)
-			if !ok || contentID == "" {
-				return nil, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)")
-			}
-			t, err := fetchTags(contentID)
-			if err != nil {
-				return nil, err
-			}
-			tags = t
-		default:
-			return nil, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded)
-		}
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
 
-		if len(tags) == 0 {
-			return nil, nil // drop
+		for msg := range in {
+			decoded, err := config.acceptConfig.Decode(msg)
+			if err != nil {
+				if !sendErr(ctx, errs, err) {
+					return
+				}
+				continue
+			}
+
+			var tags []string
+			switch v := decoded.(type) {
+			case string:
+				t, err := fetchTags(v)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					continue
+				}
+				tags = t
+			case map[string]any:
+				if raw, ok := v["tags"]; ok {
+					list, _ := raw.([]any)
+					out := make([]string, 0, len(list))
+					for _, t := range list {
+						if s, ok := t.(string); ok {
+							out = append(out, s)
+						}
+					}
+					tags = out
+					break
+				}
+				contentID, ok := v["id"].(string)
+				if !ok || contentID == "" {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-tags: rich input missing tags and cannot fall back (no id field)")) {
+						return
+					}
+					continue
+				}
+				t, err := fetchTags(contentID)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					continue
+				}
+				tags = t
+			default:
+				if !sendErr(ctx, errs, fmt.Errorf("ifunny-tags: cannot dispatch input of type %T", decoded)) {
+					return
+				}
+				continue
+			}
+
+			// Emit each tag individually
+			for _, tag := range tags {
+				b, err := config.emitConfig.Encode(tag)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					break
+				}
+				select {
+				case out <- b:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
-		return config.emitConfig.Encode(tagsEnvelope{Tags: tags})
-	}), nil
+	}, nil
 }
 
 // contentTransformer builds the ifunny-content transformer. It hydrates
@@ -770,4 +796,574 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	return bindEnrich(&config.acceptConfig, &config.emitConfig, plan)
+}
+
+// ============================================================================
+// EXPLODE TRANSFORMERS (1→N)
+// ============================================================================
+
+// timelineTransformer builds the ifunny-timeline transformer. It explodes
+// a user identifier into their timeline / posts feed, emitting each content
+// item as its own message. The shape is user-reference → []content.
+//
+// Keying: Exactly one of accept=string (bare user id/nick) or accept=json
+// (rich user object with an id or nick field) is supported. The emit axis
+// ("id" default, or "nick") selects the reference axis for both the by-id
+// and by-nick lookup paths, but for content emission the transformer always
+// fetches full Content entities (emit=string emits IDs, emit=json emits rich
+// objects per the output codec).
+//
+// The optional limit field (0 = no limit) stops emission after the Nth item.
+// Requires auth (shared client surface).
+//
+// Example:
+//
+//	transform "ifunny-timeline" "expand" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  accept = "string"
+//	  emit   = "string"
+//	  limit  = 100
+//	}
+func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		authConfig
+		acceptConfig
+		emitConfig
+		By    string `psy:"by"`
+		Limit int    `psy:"limit"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+		By:           "id",
+	}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	byNick, err := parseUserBy(config.By)
+	if err != nil {
+		return nil, fmt.Errorf("ifunny-timeline: %w", err)
+	}
+
+	if err := config.acceptConfig.bind(); err != nil {
+		return nil, err
+	}
+	if err := config.emitConfig.bind(); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+
+		for msg := range in {
+			decoded, err := config.acceptConfig.Decode(msg)
+			if err != nil {
+				if !sendErr(ctx, errs, err) {
+					return
+				}
+				continue
+			}
+
+			var userRef string
+			if config.acceptConfig.sparse() {
+				ref, ok := decoded.(string)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-timeline: expected string ref, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				userRef = ref
+			} else {
+				// Rich input: extract user reference from map
+				richIn, ok := decoded.(map[string]any)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-timeline: expected map, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				if byNick {
+					if nick, ok := richIn["nick"].(string); ok && nick != "" {
+						userRef = nick
+					} else if id, ok := richIn["id"].(string); ok && id != "" {
+						userRef = id
+					}
+				} else {
+					if id, ok := richIn["id"].(string); ok && id != "" {
+						userRef = id
+					}
+				}
+			}
+
+			if userRef == "" {
+				continue
+			}
+
+			// Iterate the timeline
+			var iter <-chan ifunny.Result[*ifunny.Content]
+			if byNick {
+				iter = client.IterTimelineByNick(userRef)
+			} else {
+				iter = client.IterTimeline(userRef)
+			}
+
+			count := 0
+			for r := range iter {
+				if r.Err != nil {
+					if !sendErr(ctx, errs, r.Err) {
+						return
+					}
+					break
+				}
+				if r.V == nil {
+					break
+				}
+
+				// Encode and emit
+				var toEmit any
+				if config.emitConfig.sparse() {
+					toEmit = r.V.ID
+				} else {
+					toEmit = r.V
+				}
+
+				b, err := config.emitConfig.Encode(toEmit)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					break
+				}
+
+				select {
+				case out <- b:
+					count++
+					if config.Limit > 0 && count >= config.Limit {
+						goto nextInput
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		nextInput:
+		}
+	}, nil
+}
+
+// commentsTransformer builds the ifunny-comments transformer. It explodes
+// a content identifier into the comment forest on that content, emitting
+// each comment (both top-level and replies) as its own message. The shape
+// is content-reference → []comment. Comment forest is walked depth-first:
+// for each top-level comment, emit it and then drain its replies before
+// advancing to the next top-level.
+//
+// The optional max-depth field (0 = no limit) stops emission after the Nth
+// level of nesting; depth 0 is top-level comments, depth 1 includes replies,
+// etc. This transformer supports accept=string (bare content id) or
+// accept=json (rich object with id field). Always emits Comment entities
+// encoded via emit codec. Requires auth.
+//
+// Example:
+//
+//	transform "ifunny-comments" "explode" {
+//	  auth-basic = env.IFUNNY_BASIC
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  accept = "string"
+//	  emit   = "json"
+//	}
+func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		authConfig
+		acceptConfig
+		emitConfig
+		MaxDepth int `psy:"max-depth"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	if err := config.acceptConfig.bind(); err != nil {
+		return nil, err
+	}
+	if err := config.emitConfig.bind(); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+
+		emitComment := func(c *ifunny.Comment) bool {
+			b, err := config.emitConfig.Encode(c)
+			if err != nil {
+				sendErr(ctx, errs, err)
+				return false
+			}
+			select {
+			case out <- b:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
+		for msg := range in {
+			decoded, err := config.acceptConfig.Decode(msg)
+			if err != nil {
+				if !sendErr(ctx, errs, err) {
+					return
+				}
+				continue
+			}
+
+			var contentID string
+			if config.acceptConfig.sparse() {
+				ref, ok := decoded.(string)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-comments: expected string ref, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				contentID = ref
+			} else {
+				richIn, ok := decoded.(map[string]any)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-comments: expected map, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				if id, ok := richIn["id"].(string); ok {
+					contentID = id
+				}
+			}
+
+			if contentID == "" {
+				continue
+			}
+
+			// Walk the comment forest depth-first
+			for r := range client.IterComments(contentID) {
+				if r.Err != nil {
+					if !sendErr(ctx, errs, r.Err) {
+						return
+					}
+					break
+				}
+				if r.V == nil {
+					break
+				}
+
+				comment := r.V
+				if config.MaxDepth < 0 || 0 <= config.MaxDepth {
+					if !emitComment(comment) {
+						return
+					}
+				}
+
+				// Emit replies only if max-depth allows (depth 0 = top-level, 1 = replies, etc.)
+				if config.MaxDepth < 0 || 1 <= config.MaxDepth {
+					if comment.Num.Replies > 0 {
+						for rr := range client.IterReplies(contentID, comment.ID) {
+							if rr.Err != nil {
+								if !sendErr(ctx, errs, rr.Err) {
+									return
+								}
+								break
+							}
+							if rr.V == nil {
+								break
+							}
+							if !emitComment(rr.V) {
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}, nil
+}
+
+// interactionPlan describes the resolved set of enabled interactions for
+// the ifunny-interactions transformer, including which user iterators to fan out.
+type interactionPlan struct {
+	author      bool
+	smiles      bool
+	republishes bool
+	comments    bool
+}
+
+// parseInteractions parses and validates the interactions list, returning
+// an interactionPlan. Empty list errors at parse time.
+func parseInteractions(list []string) (*interactionPlan, error) {
+	if len(list) == 0 {
+		return nil, fmt.Errorf("ifunny-interactions: interactions list must not be empty")
+	}
+	valid := map[string]bool{"author": true, "smiles": true, "republishes": true, "comments": true}
+	plan := &interactionPlan{}
+	for _, v := range list {
+		if !valid[v] {
+			return nil, fmt.Errorf(`ifunny-interactions: unknown interaction %q; want one of: "author", "smiles", "republishes", "comments"`, v)
+		}
+		switch v {
+		case "author":
+			plan.author = true
+		case "smiles":
+			plan.smiles = true
+		case "republishes":
+			plan.republishes = true
+		case "comments":
+			plan.comments = true
+		}
+	}
+	return plan, nil
+}
+
+// interactionsTransformer builds the ifunny-interactions transformer. It
+// explodes a content identifier into users from selected interactions on
+// that content, emitting each user as its own message. The shape is
+// content-reference → []user. The interactions list (author, smiles,
+// republishes, comments) defines which user iterators to fan out in parallel.
+//
+// - author: the author of the content itself (single user).
+// - smiles: iterate the users who smiled the content.
+// - republishes: iterate the users who republished the content.
+// - comments: iterate the authors of comments on the content.
+//
+// Goroutines fan out per-interaction, all writing to a shared out channel;
+// ordering is unspecified. The transformer respects ctx cancellation on all
+// sub-goroutines and ensures clean exit before returning.
+//
+// Example:
+//
+//	transform "ifunny-interactions" "expand" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  accept = "json"
+//	  emit   = "json"
+//	  interactions = ["author", "smiles", "republishes"]
+//	}
+func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		authConfig
+		acceptConfig
+		emitConfig
+		Interactions []string `psy:"interactions"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	plan, err := parseInteractions(config.Interactions)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := config.acceptConfig.bind(); err != nil {
+		return nil, err
+	}
+	if err := config.emitConfig.bind(); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		var wg sync.WaitGroup
+
+		// emitUser encodes and sends a single user to out. Returns false on
+		// error or cancellation, matching the producer pattern.
+		emitUser := func(u *ifunny.User) bool {
+			var toEmit any
+			if config.emitConfig.sparse() {
+				toEmit = u.ID
+			} else {
+				toEmit = u
+			}
+			b, err := config.emitConfig.Encode(toEmit)
+			if err != nil {
+				sendErr(ctx, errs, err)
+				return false
+			}
+			select {
+			case out <- b:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
+		for msg := range in {
+			decoded, err := config.acceptConfig.Decode(msg)
+			if err != nil {
+				if !sendErr(ctx, errs, err) {
+					return
+				}
+				continue
+			}
+
+			var contentID string
+			if config.acceptConfig.sparse() {
+				ref, ok := decoded.(string)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-interactions: expected string ref, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				contentID = ref
+			} else {
+				richIn, ok := decoded.(map[string]any)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-interactions: expected map, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				if id, ok := richIn["id"].(string); ok {
+					contentID = id
+				}
+			}
+
+			if contentID == "" {
+				continue
+			}
+
+			// Wait for all sub-iterators on this input to finish before moving to next
+			wg.Wait()
+
+			// Fan out one goroutine per enabled interaction
+			if plan.author {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					content, err := client.GetContent(contentID)
+					if err == nil && content != nil && content.Creator.ID != "" {
+						emitUser(&ifunny.User{ID: content.Creator.ID, Nick: content.Creator.Nick})
+					} else if err != nil {
+						sendErr(ctx, errs, err)
+					}
+				}()
+			}
+
+			if plan.smiles {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for r := range client.IterSmiles(contentID) {
+						if r.Err != nil {
+							if sendErr(ctx, errs, r.Err) {
+								return
+							}
+							break
+						}
+						if r.V == nil {
+							break
+						}
+						if !emitUser(r.V) {
+							return
+						}
+					}
+				}()
+			}
+
+			if plan.republishes {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for r := range client.IterRepublishers(contentID) {
+						if r.Err != nil {
+							if sendErr(ctx, errs, r.Err) {
+								return
+							}
+							break
+						}
+						if r.V == nil {
+							break
+						}
+						if !emitUser(r.V) {
+							return
+						}
+					}
+				}()
+			}
+
+			if plan.comments {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for r := range client.IterComments(contentID) {
+						if r.Err != nil {
+							if sendErr(ctx, errs, r.Err) {
+								return
+							}
+							break
+						}
+						if r.V == nil {
+							break
+						}
+						// Emit the comment author
+						if r.V.User.ID != "" {
+							if !emitUser(&ifunny.User{ID: r.V.User.ID, Nick: r.V.User.Nick}) {
+								return
+							}
+						}
+						// Walk replies
+						if r.V.Num.Replies > 0 {
+							for rr := range client.IterReplies(contentID, r.V.ID) {
+								if rr.Err != nil {
+									if sendErr(ctx, errs, rr.Err) {
+										return
+									}
+									break
+								}
+								if rr.V == nil {
+									break
+								}
+								if rr.V.User.ID != "" {
+									if !emitUser(&ifunny.User{ID: rr.V.User.ID, Nick: rr.V.User.Nick}) {
+										return
+									}
+								}
+							}
+						}
+					}
+				}()
+			}
+		}
+
+		wg.Wait()
+	}, nil
 }

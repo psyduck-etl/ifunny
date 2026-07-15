@@ -83,23 +83,26 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "emit"}},
-	"ifunny-timeline":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
-	"ifunny-explore":       {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
-	"ifunny-comments":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
-	"ifunny-smiles":        {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
-	"ifunny-republishers":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
-	"ifunny-subscribers":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
-	"ifunny-subscriptions": {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
-	"ifunny-channels":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "emit"}},
-	"ifunny-chat-history":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
-	"ifunny-chat-listen":   {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
-	"ifunny-chat-invites":  {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "emit"}},
-	"ifunny-author":        {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "source", "emit-by", "accept", "emit"}},
-	"ifunny-tags":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
-	"ifunny-content":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
-	"ifunny-user":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
-	"ifunny-channel":       {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-feed":             {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "emit"}},
+	"ifunny-timeline":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
+	"ifunny-explore":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
+	"ifunny-comments":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-smiles":           {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-republishers":     {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
+	"ifunny-subscribers":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-subscriptions":    {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "user", "emit"}},
+	"ifunny-channels":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "query", "emit"}},
+	"ifunny-chat-history":     {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
+	"ifunny-chat-listen":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
+	"ifunny-chat-invites":     {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "emit"}},
+	"ifunny-author":           {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "source", "emit-by", "accept", "emit"}},
+	"ifunny-tags":             {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-content":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-user":             {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
+	"ifunny-channel":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-timeline-explode": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "limit", "accept", "emit"}},
+	"ifunny-comments-explode": {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "max-depth", "accept", "emit"}},
+	"ifunny-interactions":     {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "interactions", "accept", "emit"}},
 }
 
 func TestPluginAssembly(t *testing.T) {
@@ -298,6 +301,48 @@ func runOne(t *testing.T, tr sdk.Transformer, data []byte) ([]byte, error) {
 	default:
 	}
 	return b, err
+}
+
+// runMany feeds one input record through tr and collects every emitted
+// output. Used for exploding transformers (1→N).
+func runMany(t *testing.T, tr sdk.Transformer, data []byte) ([][]byte, error) {
+	t.Helper()
+	in := make(chan []byte, 1)
+	out := make(chan []byte, 16)
+	errs := make(chan error, 16)
+	in <- data
+	close(in)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tr(t.Context(), in, out, errs)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("transformer hung")
+	}
+
+	var got [][]byte
+	for {
+		select {
+		case b, ok := <-out:
+			if !ok {
+				goto drained
+			}
+			got = append(got, b)
+		default:
+			goto drained
+		}
+	}
+drained:
+	var err error
+	select {
+	case err = <-errs:
+	default:
+	}
+	return got, err
 }
 
 // sparse in + sparse out: resolve echoes the ref through; no extract,
@@ -592,16 +637,18 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		out, err := runOne(t, tr, []byte(`{"tags":["cats","memes"]}`))
+		outs, err := runMany(t, tr, []byte(`{"tags":["cats","memes"]}`))
 		if err != nil {
 			t.Fatalf("tr: %v", err)
 		}
-		var got tagsEnvelope
-		if err := json.Unmarshal(out, &got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
+		got := make([]string, len(outs))
+		for i, b := range outs {
+			if err := json.Unmarshal(b, &got[i]); err != nil {
+				t.Fatalf("unmarshal[%d]: %v", i, err)
+			}
 		}
-		if want := []string{"cats", "memes"}; !equalStrings(got.Tags, want) {
-			t.Errorf("tags = %v, want %v", got.Tags, want)
+		if want := []string{"cats", "memes"}; !equalStrings(got, want) {
+			t.Errorf("tags = %v, want %v", got, want)
 		}
 	})
 
@@ -610,16 +657,18 @@ func TestTagsTransformer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
-		out, err := runOne(t, tr, []byte(`{"tags":["a", 1, "b", null, "c"]}`))
+		outs, err := runMany(t, tr, []byte(`{"tags":["a", 1, "b", null, "c"]}`))
 		if err != nil {
 			t.Fatalf("tr: %v", err)
 		}
-		var got tagsEnvelope
-		if err := json.Unmarshal(out, &got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
+		got := make([]string, len(outs))
+		for i, b := range outs {
+			if err := json.Unmarshal(b, &got[i]); err != nil {
+				t.Fatalf("unmarshal[%d]: %v", i, err)
+			}
 		}
-		if want := []string{"a", "b", "c"}; !equalStrings(got.Tags, want) {
-			t.Errorf("tags = %v, want %v", got.Tags, want)
+		if want := []string{"a", "b", "c"}; !equalStrings(got, want) {
+			t.Errorf("tags = %v, want %v", got, want)
 		}
 	})
 
