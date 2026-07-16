@@ -67,11 +67,15 @@ func (u *userAgentConfig) renderUA() (ifunny.UserAgent, error) {
 	)), nil
 }
 
-// clientFor builds an authenticated iFunny client for the chosen auth mode.
+// clientFor is the package-level function variable for building authenticated
+// iFunny clients. Tests can override this to inject a mock client.
+var clientFor = defaultClientFor
+
+// defaultClientFor builds an authenticated iFunny client for the chosen auth mode.
 // Exactly one of auth-basic / auth-bearer must be set; user-agent is
 // mandatory. auth-basic multiplexes on its value — literal token, "generate",
 // or "generate-cache".
-func clientFor(config *authConfig) (*ifunny.Client, error) {
+func defaultClientFor(config *authConfig) (*ifunny.Client, error) {
 	if (config.AuthBasic == "") == (config.AuthBearer == "") {
 		return nil, fmt.Errorf("exactly one of auth-basic or auth-bearer is required")
 	}
