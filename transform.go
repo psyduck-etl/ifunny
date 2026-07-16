@@ -918,6 +918,7 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 
 			count := 0
+		emit:
 			for r := range iter {
 				if r.Err != nil {
 					if !sendErr(ctx, errs, r.Err) {
@@ -949,13 +950,12 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				case out <- b:
 					count++
 					if config.Limit > 0 && count >= config.Limit {
-						goto nextInput
+						break emit
 					}
 				case <-ctx.Done():
 					return
 				}
 			}
-		nextInput:
 		}
 	}, nil
 }
@@ -967,11 +967,12 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 // for each top-level comment, emit it and then drain its replies before
 // advancing to the next top-level.
 //
-// The optional max-depth field (0 = no limit) stops emission after the Nth
-// level of nesting; depth 0 is top-level comments, depth 1 includes replies,
-// etc. This transformer supports accept=string (bare content id) or
-// accept=json (rich object with id field). Always emits Comment entities
-// encoded via emit codec. Requires auth.
+// The optional max-depth field caps reply depth: 0 = top-level only,
+// ≥1 = include replies, -1 = unlimited (default). iFunny replies don't
+// nest beyond one level, so ≥1 and -1 emit the same set. This transformer
+// supports accept=string (bare content id) or accept=json (rich object
+// with id field). Always emits Comment entities encoded via emit codec.
+// Requires auth.
 //
 // Example:
 //
@@ -1076,14 +1077,12 @@ func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				}
 
 				comment := r.V
-				if config.MaxDepth < 0 || 0 <= config.MaxDepth {
-					if !emitComment(comment) {
-						return
-					}
+				if !emitComment(comment) {
+					return
 				}
 
-				// Emit replies only if max-depth allows (depth 0 = top-level, 1 = replies, etc.)
-				if config.MaxDepth < 0 || 1 <= config.MaxDepth {
+				// max-depth: 0 = top-level only; -1 or ≥1 = include replies.
+				if config.MaxDepth != 0 {
 					if comment.Num.Replies > 0 {
 						for rr := range client.IterReplies(contentID, comment.ID) {
 							if rr.Err != nil {
@@ -1155,6 +1154,11 @@ func parseInteractions(list []string) (*interactionPlan, error) {
 // Goroutines fan out per-interaction, all writing to a shared out channel;
 // ordering is unspecified. The transformer respects ctx cancellation on all
 // sub-goroutines and ensures clean exit before returning.
+//
+// The author and comments sub-iterators emit a shallow user (ID + Nick
+// only), not a hydrated profile — chain ifunny-user downstream if you
+// need the full user object. smiles and republishes emit whatever the
+// underlying iFunny iterator returns.
 //
 // Example:
 //
@@ -1261,7 +1265,11 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				continue
 			}
 
-			// Wait for all sub-iterators on this input to finish before moving to next
+			// Serialize per-input: block until the previous record's fan-out
+			// finishes before spawning goroutines for this one. Bounds the
+			// live goroutine count at (number of enabled interactions) and
+			// keeps output naturally grouped by input, at the cost of no
+			// pipelining across inputs.
 			wg.Wait()
 
 			// Fan out one goroutine per enabled interaction
@@ -1270,10 +1278,14 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				go func() {
 					defer wg.Done()
 					content, err := client.GetContent(contentID)
-					if err == nil && content != nil && content.Creator.ID != "" {
+					if err != nil {
+						// Return-value discarded: this is the last statement
+						// in the goroutine, so nothing to do after either way.
+						_ = sendErr(ctx, errs, err)
+						return
+					}
+					if content != nil && content.Creator.ID != "" {
 						emitUser(&ifunny.User{ID: content.Creator.ID, Nick: content.Creator.Nick})
-					} else if err != nil {
-						sendErr(ctx, errs, err)
 					}
 				}()
 			}
@@ -1284,7 +1296,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 					defer wg.Done()
 					for r := range client.IterSmiles(contentID) {
 						if r.Err != nil {
-							if sendErr(ctx, errs, r.Err) {
+							if !sendErr(ctx, errs, r.Err) {
 								return
 							}
 							break
@@ -1305,7 +1317,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 					defer wg.Done()
 					for r := range client.IterRepublishers(contentID) {
 						if r.Err != nil {
-							if sendErr(ctx, errs, r.Err) {
+							if !sendErr(ctx, errs, r.Err) {
 								return
 							}
 							break
@@ -1326,7 +1338,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 					defer wg.Done()
 					for r := range client.IterComments(contentID) {
 						if r.Err != nil {
-							if sendErr(ctx, errs, r.Err) {
+							if !sendErr(ctx, errs, r.Err) {
 								return
 							}
 							break
@@ -1340,11 +1352,13 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 								return
 							}
 						}
-						// Walk replies
+						// Walk replies. A reply-iterator error is reported per-record
+						// and breaks *this* replies loop only — the outer comments
+						// iteration continues to the next top-level comment.
 						if r.V.Num.Replies > 0 {
 							for rr := range client.IterReplies(contentID, r.V.ID) {
 								if rr.Err != nil {
-									if sendErr(ctx, errs, rr.Err) {
+									if !sendErr(ctx, errs, rr.Err) {
 										return
 									}
 									break

@@ -305,23 +305,19 @@ feed a queue of tags worth searching. The store side is the
   passes new ones — i.e. the *newly seen* tags, which is what you'd queue up to
   search next.
 
-One wrinkle worth knowing up front: both `mysql-table` and `mysql-filter`
-operate on **one scalar field per record** (`fields = ["tag"]` → a record
-shaped `{"tag": "cats"}`). `ifunny-tags` emits the whole list as one record
-(`{"tags": [...]}`) and doesn't fan a post's N tags into N records. So between
-`ifunny-tags` and the per-tag mysql stages you need an **explode** step — one
-record per tag — which psyduck has no primitive for yet. Options, cheapest
-first:
+`ifunny-tags` explodes internally: a post with N tags produces N records,
+each a single tag value encoded through the emit codec (e.g. `"cats"`
+under `emit = "json"`, or bare `cats` under `emit = "string"`). Both
+`mysql-table` and `mysql-filter` want records shaped `{"tag": "cats"}`
+(`fields = ["tag"]`), so a small keying step is still needed between
+`ifunny-tags` and the per-tag mysql stages — but the fan-out (1 post → N
+records) that used to require a separate explode block now happens
+inside `ifunny-tags` itself.
 
-1. Store the array whole (`mysql-table` with a JSON/text column) and aggregate
-   counts in SQL (`GROUP BY` over an unnested tags column).
-2. An explode transformer (the channel-based Transformer contract supports
-   1-to-many, so this is now just a stdlib/plugin feature, not a core change).
-
-Instance **counts** ("how many times a tag has been seen") likewise aren't what
+Instance **counts** ("how many times a tag has been seen") aren't what
 `mysql-table` records today — `INSERT IGNORE` tracks distinct existence, not a
 tally; counting needs `INSERT … ON DUPLICATE KEY UPDATE n = n + 1` upstream in
-the `mysql` plugin. Flagging both so the census math is clear before you wire a
+the `mysql` plugin. Flagging so the census math is clear before you wire a
 database.
 
 ## Development

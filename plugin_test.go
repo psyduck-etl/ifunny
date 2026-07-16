@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -268,81 +269,73 @@ func mustBind(t *testing.T, accept, emit string, plan enrichPlan) sdk.Transforme
 	return tr
 }
 
-// runOne feeds a single record through tr under the channel-based
-// Transformer contract, mirroring the old 1→1 call shape for tests: the
-// emitted record (nil = dropped) and the first reported error.
+// runTimeout bounds how long a single test may spend inside a transformer
+// before we call it hung. Applied as a context deadline so the transformer
+// gets a real cancellation, not just a t.Fatal race.
+const runTimeout = 5 * time.Second
+
+// runOne feeds a single record through tr and returns the single emitted
+// record (nil = dropped) and the first reported error. Fatals if tr emits
+// more than one record — use runMany for 1→N transformers.
 func runOne(t *testing.T, tr sdk.Transformer, data []byte) ([]byte, error) {
 	t.Helper()
-	in := make(chan []byte, 1)
-	out := make(chan []byte, 1)
-	errs := make(chan error, 1)
-	in <- data
-	close(in)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		tr(t.Context(), in, out, errs)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("transformer hung on a single record")
-	}
-
-	var b []byte
-	select {
-	case b = <-out:
+	outs, err := runMany(t, tr, data)
+	switch len(outs) {
+	case 0:
+		return nil, err
+	case 1:
+		return outs[0], err
 	default:
+		t.Fatalf("runOne: transformer emitted %d records, want ≤1", len(outs))
+		return nil, err
 	}
-	var err error
-	select {
-	case err = <-errs:
-	default:
-	}
-	return b, err
 }
 
-// runMany feeds one input record through tr and collects every emitted
-// output. Used for exploding transformers (1→N).
+// runMany feeds a single input record through tr and collects every emitted
+// output. Blocks on tr closing its out channel (via defer close(out) in
+// the transformer contract), so any number of outputs is safe — no fixed
+// buffer to overflow. A runTimeout-bounded context is passed to tr so a
+// stuck transformer surfaces as a clear Fatal rather than blocking the
+// suite.
 func runMany(t *testing.T, tr sdk.Transformer, data []byte) ([][]byte, error) {
 	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), runTimeout)
+	defer cancel()
+
 	in := make(chan []byte, 1)
-	out := make(chan []byte, 16)
-	errs := make(chan error, 16)
+	out := make(chan []byte)
+	// errs buffered generously so a transformer that reports a burst of
+	// per-record errors doesn't block on a channel the test only drains at
+	// the end. sendErr's own ctx-aware send prevents unbounded stalls.
+	errs := make(chan error, 64)
 	in <- data
 	close(in)
 
-	done := make(chan struct{})
+	trDone := make(chan struct{})
 	go func() {
-		defer close(done)
-		tr(t.Context(), in, out, errs)
+		defer close(trDone)
+		tr(ctx, in, out, errs)
 	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("transformer hung")
+
+	// Drain outs in the foreground; range unblocks when tr's deferred
+	// close(out) runs.
+	var got [][]byte
+	for b := range out {
+		got = append(got, b)
+	}
+	<-trDone
+
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("transformer hung (%v after %s)", err, runTimeout)
 	}
 
-	var got [][]byte
-	for {
-		select {
-		case b, ok := <-out:
-			if !ok {
-				goto drained
-			}
-			got = append(got, b)
-		default:
-			goto drained
-		}
-	}
-drained:
-	var err error
+	var firstErr error
 	select {
-	case err = <-errs:
+	case firstErr = <-errs:
 	default:
 	}
-	return got, err
+	return got, firstErr
 }
 
 // sparse in + sparse out: resolve echoes the ref through; no extract,
