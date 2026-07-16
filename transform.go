@@ -355,13 +355,15 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 // tagsTransformer builds the ifunny-tags transformer. It lifts a
 // Content's tag list, emitting each tag as its own message (1→N shape).
+// Each emitted record is the raw UTF-8 bytes of the tag string — e.g.
+// []byte("cats") — with no codec wrapping. A tag has no structured
+// shape variation, so there is no emit config.
 //
 // Matrix per record:
 //
-//   - accept=string, emit=json: fetch content by id → read .tags.    1 op
-//   - accept=json,   emit=json: read map["tags"]; on miss fall back
-//     to fetching by the map's "id" field.                    0 or 1 op
-//   - emit=string: bind-time error (a tag list has no terminal ref).
+//   - accept=string: fetch content by id → read .tags.               1 op
+//   - accept=json:   read map["tags"]; on miss fall back to fetching
+//     by the map's "id" field.                              0 or 1 op
 //
 // A post with no tags is dropped (an empty tag set contributes nothing
 // to a census). Requires auth (fetches are possible on either accept).
@@ -379,29 +381,19 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	    device-version = "14"
 //	  }
 //	  accept = "json"
-//	  emit   = "json"
 //	}
 func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
-		emitConfig
 	}{
 		acceptConfig: acceptConfig{Accept: "json"},
-		emitConfig:   emitConfig{Emit: "json"},
 	}
 	if err := parse(&config); err != nil {
 		return nil, err
 	}
 
-	if config.emitConfig.sparse() {
-		return nil, fmt.Errorf("ifunny-tags: emit %q not supported — a tag list has no terminal reference", config.Emit)
-	}
-
 	if err := config.acceptConfig.bind(); err != nil {
-		return nil, err
-	}
-	if err := config.emitConfig.bind(); err != nil {
 		return nil, err
 	}
 
@@ -478,17 +470,11 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				continue
 			}
 
-			// Emit each tag individually
+			// Emit each tag as its own record: raw UTF-8 bytes of the tag
+			// string, no codec wrapping.
 			for _, tag := range tags {
-				b, err := config.emitConfig.Encode(tag)
-				if err != nil {
-					if !sendErr(ctx, errs, err) {
-						return
-					}
-					break
-				}
 				select {
-				case out <- b:
+				case out <- []byte(tag):
 				case <-ctx.Done():
 					return
 				}

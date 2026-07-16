@@ -214,7 +214,7 @@ Every transformer takes the shared auth surface (see
 | Resource | Options (beyond accept/emit) | S → T |
 | --- | --- | --- |
 | `ifunny-author` | `source` **(required)** — one of `"content"`, `"comment"`, `"chat"`; `emit-by = "id"` (default) or `"nick"` | Content / Comment / ChatEvent → User (S picked at bind by `source`) |
-| `ifunny-tags` | — | Content → `{"tags": [...]}` (json emit only) |
+| `ifunny-tags` | — | Content → raw tag bytes, one record per tag (no emit codec) |
 | `ifunny-content` | — | Content ref → Content |
 | `ifunny-user` | `by = "id"` (default) or `"nick"` | User ref → User |
 | `ifunny-channel` | — | Channel ref → ChatChannel |
@@ -242,7 +242,6 @@ Op count per accept×emit cell (S = source entity, T = target entity):
 
 Bind-time errors:
 
-- `ifunny-tags` with `emit = "string"` — a tag list has no terminal ref.
 - `ifunny-author` with `source = "comment"` or `"chat"` and `accept =
   "string"` — no single-item fetch endpoint exists for those sources.
 - `ifunny-content`, `ifunny-channel`, and `ifunny-user` (either `by`
@@ -263,8 +262,9 @@ Runtime behavior notes:
   the id, the transformer recovers by fetching the user by id — and
   reuses that fetch as the emit target on the rich-out cell. Entities
   with no author are dropped from the pipeline.
-- **`ifunny-tags`** lifts a post's tag list as `{"tags": [...]}`. Posts with
-  no tags are dropped. Missing `tags` key on a rich input triggers a
+- **`ifunny-tags`** emits one record per tag as the raw UTF-8 bytes of
+  the tag string (e.g. `[]byte("cats")`). Posts with no tags are
+  dropped. Missing `tags` key on a rich input triggers a
   content-by-id fallback fetch. See
   [Tag aggregation](#tag-aggregation) for how this feeds a tag census.
 - **`ifunny-content` / `ifunny-user` / `ifunny-channel`** hydrate (or
@@ -306,13 +306,13 @@ feed a queue of tags worth searching. The store side is the
   search next.
 
 `ifunny-tags` explodes internally: a post with N tags produces N records,
-each a single tag value encoded through the emit codec (e.g. `"cats"`
-under `emit = "json"`, or bare `cats` under `emit = "string"`). Both
-`mysql-table` and `mysql-filter` want records shaped `{"tag": "cats"}`
-(`fields = ["tag"]`), so a small keying step is still needed between
-`ifunny-tags` and the per-tag mysql stages — but the fan-out (1 post → N
-records) that used to require a separate explode block now happens
-inside `ifunny-tags` itself.
+each the raw UTF-8 bytes of one tag string — e.g. `[]byte("cats")`,
+`[]byte("memes")` — with no emit codec (no JSON quoting, no framing).
+Both `mysql-table` and `mysql-filter` want records shaped
+`{"tag": "cats"}` (`fields = ["tag"]`), so a small keying step is still
+needed between `ifunny-tags` and the per-tag mysql stages — but the
+fan-out (1 post → N records) that used to require a separate explode
+block now happens inside `ifunny-tags` itself.
 
 Instance **counts** ("how many times a tag has been seen") aren't what
 `mysql-table` records today — `INSERT IGNORE` tracks distinct existence, not a

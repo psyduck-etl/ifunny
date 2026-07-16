@@ -97,7 +97,7 @@ var expectedResources = map[string]expectedResource{
 	"ifunny-chat-listen":      {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "channel", "emit"}},
 	"ifunny-chat-invites":     {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "emit"}},
 	"ifunny-author":           {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "source", "emit-by", "accept", "emit"}},
-	"ifunny-tags":             {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
+	"ifunny-tags":             {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept"}},
 	"ifunny-content":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
 	"ifunny-user":             {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "by", "accept", "emit"}},
 	"ifunny-channel":          {sdk.TRANSFORMER, []string{"auth-basic", "auth-bearer", "user-agent", "accept", "emit"}},
@@ -618,13 +618,6 @@ func TestParseUserBy(t *testing.T) {
 // unfetchable no-id map). The id-fallback path is intentionally not tested
 // here — it calls GetContent, which is a network operation.
 func TestTagsTransformer(t *testing.T) {
-	t.Run("EmitStringRejected", func(t *testing.T) {
-		_, err := tagsTransformer(testParser(withAuth(map[string]any{"emit": "string"})))
-		if err == nil || !strings.Contains(err.Error(), "ifunny-tags") {
-			t.Fatalf("expected ifunny-tags bind error, got %v", err)
-		}
-	})
-
 	t.Run("RichInputTagsPresent", func(t *testing.T) {
 		tr, err := tagsTransformer(testParser(withAuth(nil)))
 		if err != nil {
@@ -636,9 +629,7 @@ func TestTagsTransformer(t *testing.T) {
 		}
 		got := make([]string, len(outs))
 		for i, b := range outs {
-			if err := json.Unmarshal(b, &got[i]); err != nil {
-				t.Fatalf("unmarshal[%d]: %v", i, err)
-			}
+			got[i] = string(b)
 		}
 		if want := []string{"cats", "memes"}; !equalStrings(got, want) {
 			t.Errorf("tags = %v, want %v", got, want)
@@ -656,9 +647,7 @@ func TestTagsTransformer(t *testing.T) {
 		}
 		got := make([]string, len(outs))
 		for i, b := range outs {
-			if err := json.Unmarshal(b, &got[i]); err != nil {
-				t.Fatalf("unmarshal[%d]: %v", i, err)
-			}
+			got[i] = string(b)
 		}
 		if want := []string{"a", "b", "c"}; !equalStrings(got, want) {
 			t.Errorf("tags = %v, want %v", got, want)

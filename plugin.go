@@ -219,7 +219,9 @@ func Plugin() sdk.Plugin {
 			Name:               "ifunny-tags",
 			Kinds:              sdk.TRANSFORMER,
 			ProvideTransformer: tagsTransformer,
-			Spec:               specs(acceptSpec(), emitSpec()),
+			// No emit spec: each record is the raw UTF-8 bytes of a tag
+			// string, so there is no shape variation to configure.
+			Spec: specs(acceptSpec()),
 		},
 		&sdk.Resource{
 			Name:               "ifunny-content",
