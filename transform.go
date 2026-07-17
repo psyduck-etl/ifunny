@@ -251,7 +251,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	// getUser hydrates the target User by id or nick, applying the
 	// not-found-drops convention.
 	getUser := func(req compose.Request) (*ifunny.User, error) {
-		u, err := client.GetUser(req)
+		u, err := client.GetUser(context.Background(), req)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -311,7 +311,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			return pickRef(&s)
 		}
 		plan.resolve = func(contentID string) (string, any, error) {
-			content, err := client.GetContent(contentID)
+			content, err := client.GetContent(context.Background(), contentID)
 			if err != nil {
 				return "", nil, err
 			}
@@ -402,8 +402,8 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	fetchTags := func(contentID string) ([]string, error) {
-		content, err := client.GetContent(contentID)
+	fetchTags := func(ctx context.Context, contentID string) ([]string, error) {
+		content, err := client.GetContent(ctx, contentID)
 		if err != nil {
 			return nil, err
 		}
@@ -428,7 +428,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			var tags []string
 			switch v := decoded.(type) {
 			case string:
-				t, err := fetchTags(v)
+				t, err := fetchTags(ctx, v)
 				if err != nil {
 					if !sendErr(ctx, errs, err) {
 						return
@@ -455,7 +455,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 					}
 					continue
 				}
-				t, err := fetchTags(contentID)
+				t, err := fetchTags(ctx, contentID)
 				if err != nil {
 					if !sendErr(ctx, errs, err) {
 						return
@@ -536,7 +536,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	fetchContent := func(id string) (any, error) {
-		content, err := client.GetContent(id)
+		content, err := client.GetContent(context.Background(), id)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -638,7 +638,7 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	getUser := func(req compose.Request) (*ifunny.User, error) {
-		u, err := client.GetUser(req)
+		u, err := client.GetUser(context.Background(), req)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -750,13 +750,13 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	chat, err := client.Chat()
+	chat, err := client.Chat(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	fetchChannel := func(name string) (any, error) {
-		channel, err := chat.GetChannel(compose.GetChannel(name))
+		channel, err := chat.GetChannel(context.Background(), compose.GetChannel(name))
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -898,9 +898,9 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			// Iterate the timeline
 			var iter <-chan ifunny.Result[*ifunny.Content]
 			if byNick {
-				iter = client.IterTimelineByNick(userRef)
+				iter = client.IterTimelineByNick(ctx, userRef)
 			} else {
-				iter = client.IterTimeline(userRef)
+				iter = client.IterTimeline(ctx, userRef)
 			}
 
 			count := 0
@@ -1051,7 +1051,7 @@ func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 
 			// Walk the comment forest depth-first
-			for r := range client.IterComments(contentID) {
+			for r := range client.IterComments(ctx, contentID) {
 				if r.Err != nil {
 					if !sendErr(ctx, errs, r.Err) {
 						return
@@ -1070,7 +1070,7 @@ func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				// max-depth: 0 = top-level only; -1 or ≥1 = include replies.
 				if config.MaxDepth != 0 {
 					if comment.Num.Replies > 0 {
-						for rr := range client.IterReplies(contentID, comment.ID) {
+						for rr := range client.IterReplies(ctx, contentID, comment.ID) {
 							if rr.Err != nil {
 								if !sendErr(ctx, errs, rr.Err) {
 									return
@@ -1263,7 +1263,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					content, err := client.GetContent(contentID)
+					content, err := client.GetContent(ctx, contentID)
 					if err != nil {
 						// Return-value discarded: this is the last statement
 						// in the goroutine, so nothing to do after either way.
@@ -1280,7 +1280,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					for r := range client.IterSmiles(contentID) {
+					for r := range client.IterSmiles(ctx, contentID) {
 						if r.Err != nil {
 							if !sendErr(ctx, errs, r.Err) {
 								return
@@ -1301,7 +1301,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					for r := range client.IterRepublishers(contentID) {
+					for r := range client.IterRepublishers(ctx, contentID) {
 						if r.Err != nil {
 							if !sendErr(ctx, errs, r.Err) {
 								return
@@ -1322,7 +1322,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					for r := range client.IterComments(contentID) {
+					for r := range client.IterComments(ctx, contentID) {
 						if r.Err != nil {
 							if !sendErr(ctx, errs, r.Err) {
 								return
@@ -1342,7 +1342,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 						// and breaks *this* replies loop only — the outer comments
 						// iteration continues to the next top-level comment.
 						if r.V.Num.Replies > 0 {
-							for rr := range client.IterReplies(contentID, r.V.ID) {
+							for rr := range client.IterReplies(ctx, contentID, r.V.ID) {
 								if rr.Err != nil {
 									if !sendErr(ctx, errs, rr.Err) {
 										return

@@ -51,13 +51,13 @@ func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	chat, err := client.Chat()
+	chat, err := client.Chat(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		iter := chat.IterMessages(compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
+		iter := chat.IterMessages(ctx, compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
 		produceIter(ctx, iter, send, errs, &config.emitConfig)
 	}, nil
 }
@@ -110,7 +110,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	chat, err := client.Chat()
+	chat, err := client.Chat(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
 		events := make(chan *ifunny.ChatEvent)
 		done := make(chan struct{})
 
-		unsubscribe, err := chat.OnChannelEvent(config.Channel, func(event *ifunny.ChatEvent) error {
+		unsubscribe, err := chat.OnChannelEvent(ctx, config.Channel, func(event *ifunny.ChatEvent) error {
 			select {
 			case events <- event:
 			case <-done:
@@ -205,7 +205,7 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
-	chat, err := client.Chat()
+	chat, err := client.Chat(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
 		invites := make(chan *ifunny.ChatChannel)
 		done := make(chan struct{})
 
-		unsubscribe, err := chat.OnChannelInvite(func(_ int, channel *ifunny.ChatChannel) error {
+		unsubscribe, err := chat.OnChannelInvite(ctx, func(_ int, channel *ifunny.ChatChannel) error {
 			select {
 			case invites <- channel:
 			case <-done:
@@ -310,11 +310,11 @@ func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
 	// (no pagination); a query hits the paginated open-channels search.
 	if config.Query == "" {
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			produceIter(ctx, client.IterChannelsTrending(), send, errs, &config.emitConfig)
+			produceIter(ctx, client.IterChannelsTrending(ctx), send, errs, &config.emitConfig)
 		}, nil
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterChannelsQuery(config.Query), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterChannelsQuery(ctx, config.Query), send, errs, &config.emitConfig)
 	}, nil
 }

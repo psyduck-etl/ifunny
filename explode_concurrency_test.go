@@ -87,9 +87,9 @@ func drainConcurrently(out <-chan []byte, errs <-chan error) ([][]byte, []error)
 
 // TestInteractionsCtxCancelPropagates verifies that cancelling the transformer's
 // context causes it to return promptly even when sub-iterators are mid-flight,
-// and that out is closed so downstream readers unblock. Because ifunny-go does
-// not thread ctx through its HTTP calls, we can't abort the pending request
-// itself — but the emit/sendErr guards must still fire once the call completes.
+// and that out is closed so downstream readers unblock. ctx now threads all the
+// way through ifunny-go's HTTP calls, so cancellation aborts the in-flight
+// request itself rather than only firing the emit/sendErr guards afterward.
 func TestInteractionsCtxCancelPropagates(t *testing.T) {
 	srv := ifunnymock.New(t)
 	useMockClient(t, srv)

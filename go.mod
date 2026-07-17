@@ -4,13 +4,13 @@ go 1.25.0
 
 require (
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/open-ifunny/ifunny-go v0.1.4
+	github.com/open-ifunny/ifunny-go v0.1.5-0.20260717164726-1cc8ed69dbb8
 	github.com/psyduck-etl/sdk v0.6.0
 )
 
 require (
 	github.com/fatih/color v1.13.0 // indirect
-	github.com/gastrodon/turnpike v1.1.0 // indirect
+	github.com/gastrodon/turnpike v1.1.1-0.20260717164209-4ba6aaf4e2c5 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect

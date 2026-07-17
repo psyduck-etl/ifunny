@@ -49,7 +49,7 @@ func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterFeed(config.Feed), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterFeed(ctx, config.Feed), send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -115,11 +115,11 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 
 	if config.ByNick != "" {
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			produceIter(ctx, client.IterTimelineByNick(config.ByNick), send, errs, &config.emitConfig)
+			produceIter(ctx, client.IterTimelineByNick(ctx, config.ByNick), send, errs, &config.emitConfig)
 		}, nil
 	}
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterTimeline(config.ByID), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterTimeline(ctx, config.ByID), send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -184,15 +184,15 @@ func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
 	switch config.Kind {
 	case "content":
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			produceIter(ctx, client.IterExploreContent(config.Compilation), send, errs, &config.emitConfig)
+			produceIter(ctx, client.IterExploreContent(ctx, config.Compilation), send, errs, &config.emitConfig)
 		}, nil
 	case "user":
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			produceIter(ctx, client.IterExploreUser(config.Compilation), send, errs, &config.emitConfig)
+			produceIter(ctx, client.IterExploreUser(ctx, config.Compilation), send, errs, &config.emitConfig)
 		}, nil
 	case "chat":
 		return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-			produceIter(ctx, client.IterExploreChatChannel(config.Compilation), send, errs, &config.emitConfig)
+			produceIter(ctx, client.IterExploreChatChannel(ctx, config.Compilation), send, errs, &config.emitConfig)
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown explore kind %q, want one of: content, user, chat", config.Kind)

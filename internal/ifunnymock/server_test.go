@@ -1,6 +1,7 @@
 package ifunnymock
 
 import (
+	"context"
 	"testing"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
@@ -17,7 +18,7 @@ func TestMockServerUserByNick(t *testing.T) {
 		t.Fatalf("MakeClientBasic: %v", err)
 	}
 
-	got, err := client.GetUser(compose.UserByNick("alice"))
+	got, err := client.GetUser(context.Background(), compose.UserByNick("alice"))
 	if err != nil {
 		t.Fatalf("GetUser: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestMockServerContent(t *testing.T) {
 		t.Fatalf("MakeClientBasic: %v", err)
 	}
 
-	got, err := client.GetContent(content.ID)
+	got, err := client.GetContent(context.Background(), content.ID)
 	if err != nil {
 		t.Fatalf("GetContent: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestMockServerTimeline(t *testing.T) {
 
 	// Iterate and collect all
 	var got []*ifunny.Content
-	for r := range client.IterTimeline(alice.ID) {
+	for r := range client.IterTimeline(context.Background(), alice.ID) {
 		if r.Err != nil {
 			t.Fatalf("IterTimeline error: %v", r.Err)
 		}
@@ -99,7 +100,7 @@ func TestMockServerComments(t *testing.T) {
 
 	// Iterate and collect
 	var got []*ifunny.Comment
-	for r := range client.IterComments(content.ID) {
+	for r := range client.IterComments(context.Background(), content.ID) {
 		if r.Err != nil {
 			t.Fatalf("IterComments error: %v", r.Err)
 		}
@@ -144,7 +145,7 @@ func TestMockServerReplies(t *testing.T) {
 
 	// Iterate replies
 	var got []*ifunny.Comment
-	for r := range client.IterReplies(content.ID, comment.ID) {
+	for r := range client.IterReplies(context.Background(), content.ID, comment.ID) {
 		if r.Err != nil {
 			t.Fatalf("IterReplies error: %v", r.Err)
 		}
@@ -177,7 +178,7 @@ func TestMockServerSmiles(t *testing.T) {
 
 	// Iterate smiles
 	var got []*ifunny.User
-	for r := range client.IterSmiles(content.ID) {
+	for r := range client.IterSmiles(context.Background(), content.ID) {
 		if r.Err != nil {
 			t.Fatalf("IterSmiles error: %v", r.Err)
 		}

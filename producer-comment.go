@@ -48,14 +48,14 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	// Fail fast on a bad content id rather than mid-stream.
-	if _, err := client.GetContent(config.Content); err != nil {
+	if _, err := client.GetContent(context.Background(), config.Content); err != nil {
 		return nil, err
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		defer close(send)
 
-		for r := range client.IterComments(config.Content) {
+		for r := range client.IterComments(ctx, config.Content) {
 			if r.Err != nil {
 				sendErr(ctx, errs, r.Err)
 				return
@@ -70,7 +70,7 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 			if comment.Num.Replies == 0 {
 				continue
 			}
-			for rr := range client.IterReplies(config.Content, comment.ID) {
+			for rr := range client.IterReplies(ctx, config.Content, comment.ID) {
 				if rr.Err != nil {
 					sendErr(ctx, errs, rr.Err)
 					return

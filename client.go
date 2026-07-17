@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
@@ -89,7 +90,7 @@ func defaultClientFor(config *authConfig) (*ifunny.Client, error) {
 	}
 
 	if config.AuthBearer != "" {
-		return ifunny.MakeClient(config.AuthBearer, ua)
+		return ifunny.MakeClient(context.Background(), config.AuthBearer, ua)
 	}
 	return basicClient(config.AuthBasic, ua)
 }
@@ -141,7 +142,7 @@ func mintPrimedClientWithToken(ua ifunny.UserAgent) (*ifunny.Client, string, err
 	if err != nil {
 		return nil, "", err
 	}
-	if err := client.PrimeBasic(); err != nil {
+	if err := client.PrimeBasic(context.Background()); err != nil {
 		return nil, "", fmt.Errorf("prime basic token: %w", err)
 	}
 	return client, basic, nil

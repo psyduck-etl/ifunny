@@ -38,7 +38,7 @@ func produceSmiles(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterSmiles(config.Content), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterSmiles(ctx, config.Content), send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -73,7 +73,7 @@ func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterRepublishers(config.Content), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterRepublishers(ctx, config.Content), send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -116,7 +116,7 @@ func produceSubscribers(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterSubscribers(config.User), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterSubscribers(ctx, config.User), send, errs, &config.emitConfig)
 	}, nil
 }
 
@@ -151,6 +151,6 @@ func produceSubscriptions(parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterSubscriptions(config.User), send, errs, &config.emitConfig)
+		produceIter(ctx, client.IterSubscriptions(ctx, config.User), send, errs, &config.emitConfig)
 	}, nil
 }
