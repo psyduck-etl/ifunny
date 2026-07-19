@@ -11,9 +11,8 @@ import (
 // comment it emits the comment itself and then, if the comment has
 // replies, drains that comment's reply iterator before advancing to
 // the next top-level comment. Every emission is a Comment entity
-// encoded via codec (default "json"). The producer eagerly fetches
-// the content once at bind to fail fast on a bad content id rather
-// than surfacing the error mid-stream.
+// encoded via codec (default "json"). A bad content id surfaces as an
+// error mid-stream via errs rather than at bind.
 //
 // This replaces the older split between ifunny-comments and
 // ifunny-replies — a downstream consumer walking a post's whole
@@ -44,11 +43,6 @@ func produceComments(parse sdk.Parser) (sdk.Producer, error) {
 
 	client, err := clientFor(&config.authConfig)
 	if err != nil {
-		return nil, err
-	}
-
-	// Fail fast on a bad content id rather than mid-stream.
-	if _, err := client.GetContent(context.Background(), config.Content); err != nil {
 		return nil, err
 	}
 
