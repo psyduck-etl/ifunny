@@ -22,13 +22,13 @@ import (
 //	  content = "abc123"
 //	  emit     = "json"
 //	}
-func produceSmiles(parse sdk.Parser) (sdk.Producer, error) {
+func produceSmiles(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &contentConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -57,13 +57,13 @@ func produceSmiles(parse sdk.Parser) (sdk.Producer, error) {
 //	  content = "abc123"
 //	  emit     = "json"
 //	}
-func produceRepublishers(parse sdk.Parser) (sdk.Producer, error) {
+func produceRepublishers(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &contentConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -100,13 +100,13 @@ type userConfig struct {
 //	  user = "u9876543210"
 //	  emit     = "json"
 //	}
-func produceSubscribers(parse sdk.Parser) (sdk.Producer, error) {
+func produceSubscribers(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &userConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -135,13 +135,13 @@ func produceSubscribers(parse sdk.Parser) (sdk.Producer, error) {
 //	  user = "u9876543210"
 //	  emit     = "json"
 //	}
-func produceSubscriptions(parse sdk.Parser) (sdk.Producer, error) {
+func produceSubscriptions(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &userConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 

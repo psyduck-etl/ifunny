@@ -36,13 +36,13 @@ type chatConfig struct {
 //	  channel = "chat.some-channel-name"
 //	  emit     = "json"
 //	}
-func produceChatHistory(parse sdk.Parser) (sdk.Producer, error) {
+func produceChatHistory(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &chatConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -95,13 +95,13 @@ type chatListenConfig struct {
 //	  channel = "chat.some-channel-name"
 //	  emit    = "json"
 //	}
-func produceChatListen(parse sdk.Parser) (sdk.Producer, error) {
+func produceChatListen(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &chatListenConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -190,13 +190,13 @@ type invitesConfig struct {
 //	  }
 //	  emit = "json"
 //	}
-func produceChatInvites(parse sdk.Parser) (sdk.Producer, error) {
+func produceChatInvites(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &invitesConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -291,13 +291,13 @@ type channelsConfig struct {
 //	  query = "gaming"
 //	  emit     = "json"
 //	}
-func produceChannels(parse sdk.Parser) (sdk.Producer, error) {
+func produceChannels(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &channelsConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 

@@ -31,13 +31,13 @@ import (
 //	  content = "abc123"
 //	  emit     = "json"
 //	}
-func produceComments(parse sdk.Parser) (sdk.Producer, error) {
+func produceComments(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &contentConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 

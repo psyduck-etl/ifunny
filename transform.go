@@ -87,18 +87,18 @@ func parseUserBy(v string) (byNick bool, err error) {
 //
 // extract pulls T's terminal ref (and optionally a hydrated T from a
 // recovery fetch — see the by-nick paths) out of rich input bytes.
-// Called only on the !accept.sparse() cells. Direct json.Unmarshal
+// Called only on the !accept.Sparse() cells. Direct json.Unmarshal
 // against a shadow struct is deliberate; see bindEnrich for why the
 // codec bypass is safe.
 //
 // resolve maps a bare source ref to T's terminal ref, again optionally
-// short-circuiting with a hydrated T. Called only on the accept.sparse()
+// short-circuiting with a hydrated T. Called only on the accept.Sparse()
 // cells. A nil resolve marks a cell whose source is unfetchable from
 // the client surface (ifunny-author with source = comment | chat: there
 // is no single-comment or single-message endpoint); bindEnrich returns
 // a bind error in that case rather than silently degrading.
 //
-// fetch hydrates T by its terminal ref. Called only on the !emit.sparse()
+// fetch hydrates T by its terminal ref. Called only on the !emit.Sparse()
 // cells, and only when neither extract nor resolve short-circuited with
 // a hydrated target. (nil, nil) means not-found → drop the record.
 type enrichPlan struct {
@@ -115,7 +115,7 @@ type enrichPlan struct {
 //
 // The direct json.Unmarshal inside extract closures bypasses the accept
 // codec's Decode path. That is safe here because bindEnrich only routes
-// records to extract when accept.sparse() is false, and acceptConfig.bind
+// records to extract when accept.Sparse() is false, and acceptConfig.bind
 // pinned the codec via exact-match sdk.GetCodec — a non-"string" spec
 // today resolves to the literal "json" codec (host-registered or the
 // test stub). The invariant "accept != string ⇒ record bytes are JSON"
@@ -125,7 +125,7 @@ type enrichPlan struct {
 // emit path always encodes through emit.Encode so downstream stages
 // keep talking to the codec registry.
 func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Transformer, error) {
-	if accept.sparse() && plan.resolve == nil {
+	if accept.Sparse() && plan.resolve == nil {
 		return nil, fmt.Errorf("%s: accept=string not satisfiable for this source (no fetch-by-ref endpoint)", plan.name)
 	}
 
@@ -134,7 +134,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 	// closure reuses in place of a redundant plan.fetch call. It carries
 	// the stage ctx so its fetches abort on cancellation.
 	var frontHalf func(ctx context.Context, data []byte) (string, any, error)
-	if accept.sparse() {
+	if accept.Sparse() {
 		frontHalf = func(ctx context.Context, data []byte) (string, any, error) {
 			decoded, err := accept.Decode(data)
 			if err != nil {
@@ -153,7 +153,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 		frontHalf = plan.extract
 	}
 
-	if emit.sparse() {
+	if emit.Sparse() {
 		return sdk.MapContext(func(ctx context.Context, data []byte) ([]byte, error) {
 			ref, _, err := frontHalf(ctx, data)
 			if err != nil || ref == "" {
@@ -221,7 +221,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 //	  accept  = "json"
 //	  emit    = "string"
 //	}
-func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func authorTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -242,10 +242,10 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, fmt.Errorf("ifunny-author: %w", err)
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -389,7 +389,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	  }
 //	  accept = "json"
 //	}
-func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func tagsTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -400,7 +400,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -519,7 +519,7 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	  accept = "string"
 //	  emit   = "json"
 //	}
-func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func contentTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -532,14 +532,14 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
+	if config.acceptConfig.Sparse() && config.emitConfig.Sparse() {
 		return nil, fmt.Errorf("ifunny-content: accept=string emit=string is a no-op (id → same id)")
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -620,7 +620,7 @@ type userConfigT struct {
 //	  accept = "string"
 //	  emit   = "json"
 //	}
-func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func userTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := &userConfigT{
 		acceptConfig: acceptConfig{Accept: "json"},
 		emitConfig:   emitConfig{Emit: "json"},
@@ -634,14 +634,14 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ifunny-user: %w", err)
 	}
-	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
+	if config.acceptConfig.Sparse() && config.emitConfig.Sparse() {
 		return nil, fmt.Errorf("ifunny-user: accept=string emit=string is a no-op (%s → same %s)", config.By, config.By)
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -734,7 +734,7 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	  accept = "string"
 //	  emit   = "json"
 //	}
-func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func channelTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -747,14 +747,14 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	if config.acceptConfig.sparse() && config.emitConfig.sparse() {
+	if config.acceptConfig.Sparse() && config.emitConfig.Sparse() {
 		return nil, fmt.Errorf("ifunny-channel: accept=string emit=string is a no-op (name → same name)")
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -827,7 +827,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	  emit   = "string"
 //	  limit  = 100
 //	}
-func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func timelineTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -848,10 +848,10 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, fmt.Errorf("ifunny-timeline: %w", err)
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -873,7 +873,7 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 
 			var userRef string
-			if config.acceptConfig.sparse() {
+			if config.acceptConfig.Sparse() {
 				ref, ok := decoded.(string)
 				if !ok {
 					if !sendErr(ctx, errs, fmt.Errorf("ifunny-timeline: expected string ref, got %T", decoded)) {
@@ -931,7 +931,7 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 				// Encode and emit
 				var toEmit any
-				if config.emitConfig.sparse() {
+				if config.emitConfig.Sparse() {
 					toEmit = r.V.ID
 				} else {
 					toEmit = r.V
@@ -984,7 +984,7 @@ func timelineTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 //	  accept = "string"
 //	  emit   = "json"
 //	}
-func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func commentsTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -998,10 +998,10 @@ func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -1037,7 +1037,7 @@ func commentsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 
 			var contentID string
-			if config.acceptConfig.sparse() {
+			if config.acceptConfig.Sparse() {
 				ref, ok := decoded.(string)
 				if !ok {
 					if !sendErr(ctx, errs, fmt.Errorf("ifunny-comments: expected string ref, got %T", decoded)) {
@@ -1171,7 +1171,7 @@ func parseInteractions(list []string) (*interactionPlan, error) {
 //	  emit   = "json"
 //	  interactions = ["author", "smiles", "republishes"]
 //	}
-func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
+func interactionsTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
 	config := struct {
 		authConfig
 		acceptConfig
@@ -1190,10 +1190,10 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	if err := config.acceptConfig.bind(); err != nil {
+	if err := config.acceptConfig.Bind(); err != nil {
 		return nil, err
 	}
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -1210,7 +1210,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		// error or cancellation, matching the producer pattern.
 		emitUser := func(u *ifunny.User) bool {
 			var toEmit any
-			if config.emitConfig.sparse() {
+			if config.emitConfig.Sparse() {
 				toEmit = u.ID
 			} else {
 				toEmit = u
@@ -1238,7 +1238,7 @@ func interactionsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 
 			var contentID string
-			if config.acceptConfig.sparse() {
+			if config.acceptConfig.Sparse() {
 				ref, ok := decoded.(string)
 				if !ok {
 					if !sendErr(ctx, errs, fmt.Errorf("ifunny-interactions: expected string ref, got %T", decoded)) {

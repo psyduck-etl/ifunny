@@ -62,7 +62,7 @@ func (stringCodec) Encode(v any) ([]byte, error) {
 // bug, not a runtime condition.
 func testAccept(spec string) *acceptConfig {
 	c := &acceptConfig{Accept: spec}
-	if err := c.bind(); err != nil {
+	if err := c.Bind(); err != nil {
 		panic(err)
 	}
 	return c
@@ -70,7 +70,7 @@ func testAccept(spec string) *acceptConfig {
 
 func testEmit(spec string) *emitConfig {
 	c := &emitConfig{Emit: spec}
-	if err := c.bind(); err != nil {
+	if err := c.Bind(); err != nil {
 		panic(err)
 	}
 	return c

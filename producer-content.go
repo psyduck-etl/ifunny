@@ -33,13 +33,13 @@ type feedConfig struct {
 //	  emit       = "json"
 //	  stop-after = 100
 //	}
-func produceFeed(parse sdk.Parser) (sdk.Producer, error) {
+func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &feedConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -92,7 +92,7 @@ type timelineConfig struct {
 //	  by-nick = "some-user"
 //	  emit     = "json"
 //	}
-func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
+func produceTimeline(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &timelineConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func produceTimeline(parse sdk.Parser) (sdk.Producer, error) {
 		return nil, fmt.Errorf("ifunny-timeline: exactly one of by-id or by-nick is required")
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
@@ -166,13 +166,13 @@ type exploreConfig struct {
 //	  kind        = "chat"
 //	  emit        = "json"
 //	}
-func produceExplore(parse sdk.Parser) (sdk.Producer, error) {
+func produceExplore(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &exploreConfig{emitConfig: emitConfig{Emit: "json"}}
 	if err := parse(config); err != nil {
 		return nil, err
 	}
 
-	if err := config.emitConfig.bind(); err != nil {
+	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
 
