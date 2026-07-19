@@ -482,7 +482,13 @@ func tagsTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 				tags = t
 			case map[string]any:
 				if raw, ok := v["tags"]; ok {
-					list, _ := raw.([]any)
+					list, ok := raw.([]any)
+					if !ok {
+						if !sendErr(ctx, errs, fmt.Errorf("ifunny-tags: content %v has non-array tags field of type %T", v["id"], raw)) {
+							return
+						}
+						continue
+					}
 					out := make([]string, 0, len(list))
 					for _, t := range list {
 						if s, ok := t.(string); ok {
