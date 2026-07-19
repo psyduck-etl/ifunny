@@ -52,10 +52,8 @@ github.com/open-ifunny/ifunny-go v0.2.0 h1:UNAAhgljStgFbBzHWl0wgftdOl/2v17GDhTG8
 github.com/open-ifunny/ifunny-go v0.2.0/go.mod h1:OOhlFEcOlMdEza6RCVR9uGefadBQ328bnS+zzmuecXs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/psyduck-etl/sdk v0.6.1 h1:6xQoyz0jeP4TCDpucwA3Hfs+HW3/REoMfZa9P3uyoi0=
-github.com/psyduck-etl/sdk v0.6.1/go.mod h1:NdqD30whD731zzGD4CK9beh63nFC63VKsAfkQ9ERZjw=
-github.com/psyduck-etl/sdk v0.6.2-0.20260719224910-e96ab0873a45 h1:Mk3Jm2q4iYPj0SKnIEozyIw/cZSTgi/XyGBv+16PCTU=
-github.com/psyduck-etl/sdk v0.6.2-0.20260719224910-e96ab0873a45/go.mod h1:NdqD30whD731zzGD4CK9beh63nFC63VKsAfkQ9ERZjw=
+github.com/psyduck-etl/sdk v0.7.0 h1:DCQcJtXBWbnu0QpKx5Wl1xcmiuQun6MflECkFbwUjTE=
+github.com/psyduck-etl/sdk v0.7.0/go.mod h1:NdqD30whD731zzGD4CK9beh63nFC63VKsAfkQ9ERZjw=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/smartystreets/assertions v0.0.0-20160707190355-2063fd1cc7c9 h1:Kg4w5zDU3jgGRghptweqKKNAADO4nqR0Grd9WomB8H4=
