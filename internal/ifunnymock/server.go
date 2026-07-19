@@ -1,7 +1,6 @@
 package ifunnymock
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,12 +23,12 @@ type Server struct {
 
 // store holds all fixtures and manages concurrent access.
 type store struct {
-	mu       sync.RWMutex
-	users    map[string]*ifunny.User
-	content  map[string]*ifunny.Content
-	comments map[string][]*ifunny.Comment
-	smiles   map[string][]*ifunny.User
-	replublishers map[string][]*ifunny.User
+	mu           sync.RWMutex
+	users        map[string]*ifunny.User
+	content      map[string]*ifunny.Content
+	comments     map[string][]*ifunny.Comment
+	smiles       map[string][]*ifunny.User
+	republishers map[string][]*ifunny.User
 
 	// latency, when >0, is applied to every request before dispatch.
 	latency time.Duration
@@ -52,11 +51,11 @@ type errRule struct {
 func New(t testing.TB) *Server {
 	s := &Server{
 		store: &store{
-			users:         make(map[string]*ifunny.User),
-			content:       make(map[string]*ifunny.Content),
-			comments:      make(map[string][]*ifunny.Comment),
-			smiles:        make(map[string][]*ifunny.User),
-			replublishers: make(map[string][]*ifunny.User),
+			users:        make(map[string]*ifunny.User),
+			content:      make(map[string]*ifunny.Content),
+			comments:     make(map[string][]*ifunny.Comment),
+			smiles:       make(map[string][]*ifunny.User),
+			republishers: make(map[string][]*ifunny.User),
 		},
 	}
 	s.srv = httptest.NewServer(s.router())
@@ -94,22 +93,13 @@ func (s *Server) AddContent(author *ifunny.User) *ifunny.Content {
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
 
-	// Count existing content by this author
+	// Find the next free sequence number for this author.
 	seq := 1
-	for id := range s.store.content {
-		// Check if this content belongs to the author
-		if len(id) > len(author.Nick)+3 && id[:2] == "c-" {
-			// Rough check; real production code would track per-author
-		}
-	}
-
-	// Find next sequence number for this author
-	for i := 1; i <= 1000; i++ {
-		testID := fmt.Sprintf("c-%s-%d", author.Nick, i)
-		if _, exists := s.store.content[testID]; !exists {
-			seq = i
+	for {
+		if _, exists := s.store.content[fmt.Sprintf("c-%s-%d", author.Nick, seq)]; !exists {
 			break
 		}
+		seq++
 	}
 
 	id := fmt.Sprintf("c-%s-%d", author.Nick, seq)
@@ -129,25 +119,7 @@ func (s *Server) AddComment(content *ifunny.Content, author *ifunny.User, text s
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
 
-	// Find next sequence number for this content
-	seq := 1
-	for {
-		testID := fmt.Sprintf("cm-%s-%d", content.ID, seq)
-		found := false
-		if comments, ok := s.store.comments[content.ID]; ok {
-			for _, c := range comments {
-				if c.ID == testID {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			break
-		}
-		seq++
-	}
-
+	seq := len(s.store.comments[content.ID]) + 1
 	id := fmt.Sprintf("cm-%s-%d", content.ID, seq)
 	cm := &ifunny.Comment{
 		ID:   id,
@@ -164,25 +136,7 @@ func (s *Server) AddReply(parent *ifunny.Comment, author *ifunny.User, text stri
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
 
-	// Find next sequence number for replies
-	seq := 1
-	for {
-		testID := fmt.Sprintf("cm-%s-%s-r%d", parent.CID, parent.ID, seq)
-		found := false
-		if comments, ok := s.store.comments[parent.CID]; ok {
-			for _, c := range comments {
-				if c.ID == testID {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			break
-		}
-		seq++
-	}
-
+	seq := len(s.store.comments[parent.CID]) + 1
 	id := fmt.Sprintf("cm-%s-%s-r%d", parent.CID, parent.ID, seq)
 	reply := &ifunny.Comment{
 		ID:           id,
@@ -194,13 +148,11 @@ func (s *Server) AddReply(parent *ifunny.Comment, author *ifunny.User, text stri
 		RootCommID:   parent.ID,
 	}
 
-	// Increment parent's reply count
-	if comments, ok := s.store.comments[parent.CID]; ok {
-		for _, c := range comments {
-			if c.ID == parent.ID {
-				c.Num.Replies++
-				break
-			}
+	// Increment parent's reply count.
+	for _, c := range s.store.comments[parent.CID] {
+		if c.ID == parent.ID {
+			c.Num.Replies++
+			break
 		}
 	}
 
@@ -219,7 +171,7 @@ func (s *Server) AddSmiler(c *ifunny.Content, u *ifunny.User) {
 func (s *Server) AddRepublisher(c *ifunny.Content, u *ifunny.User) {
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
-	s.store.replublishers[c.ID] = append(s.store.replublishers[c.ID], u)
+	s.store.republishers[c.ID] = append(s.store.republishers[c.ID], u)
 }
 
 // SetLatency configures a per-response delay applied to every request
@@ -304,491 +256,240 @@ func (s *Server) router() http.Handler {
 
 // handleAccount returns the authenticated user (mock).
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
-	s.store.mu.RLock()
-	mockUser := &ifunny.User{
-		ID:   "mock-self",
-		Nick: "mock-user",
-	}
-	s.store.mu.RUnlock()
-
-	resp := map[string]interface{}{
-		"data": mockUser,
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, &ifunny.User{ID: "mock-self", Nick: "mock-user"})
 }
 
 // handleCounters returns an empty OK response.
 func (s *Server) handleCounters(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]interface{}{
-		"data": map[string]interface{}{},
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, map[string]any{})
 }
 
 // handleDynamic routes to specific endpoints based on the path.
 func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Parse /users/{id}
-	if len(path) > 7 && path[:7] == "/users/" {
-		rest := path[7:]
-		if len(rest) > 8 && rest[:8] == "by_nick/" {
-			s.handleUserByNick(w, rest[8:])
+	if rest, ok := strings.CutPrefix(path, "/users/"); ok {
+		if nick, ok := strings.CutPrefix(rest, "by_nick/"); ok {
+			s.handleUserByNick(w, nick)
 			return
 		}
 		s.handleUserByID(w, rest)
 		return
 	}
 
-	// Parse /content/{id}
-	if len(path) > 9 && path[:9] == "/content/" {
-		rest := path[9:]
-		// Find the content ID (everything before the next /)
-		slashIdx := -1
-		for i := 0; i < len(rest); i++ {
-			if rest[i] == '/' {
-				slashIdx = i
-				break
-			}
-		}
-
-		if slashIdx == -1 {
-			// Just /content/{id}
-			s.handleContent(w, rest)
-			return
-		}
-
-		contentID := rest[:slashIdx]
-		remainder := rest[slashIdx+1:]
-
-		// /content/{id}/comments or /content/{id}/comments/{cid}/replies
-		if strings.HasPrefix(remainder, "comments") {
-			if remainder == "comments" {
-				s.handleComments(w, r, contentID)
-				return
-			}
-			if len(remainder) > 9 && remainder[:9] == "comments/" {
-				commentID := remainder[9:]
-				// Check if this is /content/{id}/comments/{cid}/replies
-				if idx := findSlash(commentID); idx != -1 {
-					cid := commentID[:idx]
-					rest2 := commentID[idx+1:]
-					if strings.HasPrefix(rest2, "replies") {
-						s.handleReplies(w, r, contentID, cid)
-						return
-					}
-				}
-				// Just /content/{id}/comments
-				s.handleComments(w, r, contentID)
-				return
-			}
-		}
-
-		// /content/{id}/smiles
-		if remainder == "smiles" {
-			s.handleSmiles(w, r, contentID)
-			return
-		}
-
-		// /content/{id}/republished
-		if remainder == "republished" {
-			s.handleRepublished(w, r, contentID)
-			return
-		}
-	}
-
-	// /timelines/users/{id}
-	if len(path) > 17 && path[:17] == "/timelines/users/" {
-		rest := path[17:]
-		if len(rest) > 8 && rest[:8] == "by_nick/" {
-			s.handleTimelineByNick(w, r, rest[8:])
+	if rest, ok := strings.CutPrefix(path, "/timelines/users/"); ok {
+		if nick, ok := strings.CutPrefix(rest, "by_nick/"); ok {
+			s.handleTimelineByNick(w, r, nick)
 			return
 		}
 		s.handleTimeline(w, r, rest)
 		return
 	}
 
-	http.NotFound(w, r)
-}
-
-func findSlash(s string) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '/' {
-			return i
+	if rest, ok := strings.CutPrefix(path, "/content/"); ok {
+		contentID, sub, hasSub := strings.Cut(rest, "/")
+		switch {
+		case !hasSub:
+			s.handleContent(w, contentID)
+		case sub == "smiles":
+			s.handleSmiles(w, r, contentID)
+		case sub == "republished":
+			s.handleRepublished(w, r, contentID)
+		case sub == "comments":
+			s.handleComments(w, r, contentID)
+		case strings.HasPrefix(sub, "comments/"):
+			commentID, tail, hasTail := strings.Cut(strings.TrimPrefix(sub, "comments/"), "/")
+			if hasTail && strings.HasPrefix(tail, "replies") {
+				s.handleReplies(w, r, contentID, commentID)
+			} else {
+				s.handleComments(w, r, contentID)
+			}
+		default:
+			http.NotFound(w, r)
 		}
+		return
 	}
-	return -1
+
+	http.NotFound(w, r)
 }
 
 // handleUserByID returns a user by ID.
 func (s *Server) handleUserByID(w http.ResponseWriter, id string) {
 	s.store.mu.RLock()
 	u, ok := s.store.users[id]
+	var user ifunny.User
+	if ok {
+		user = *u
+	}
 	s.store.mu.RUnlock()
 
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "user not found",
-		})
+		writeNotFound(w, "user not found")
 		return
 	}
-
-	resp := map[string]interface{}{
-		"data": u,
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, &user)
 }
 
 // handleUserByNick returns a user by nick.
 func (s *Server) handleUserByNick(w http.ResponseWriter, nick string) {
 	s.store.mu.RLock()
-	var u *ifunny.User
-	for _, user := range s.store.users {
-		if user.Nick == nick {
-			u = user
+	var user ifunny.User
+	found := false
+	for _, u := range s.store.users {
+		if u.Nick == nick {
+			user, found = *u, true
 			break
 		}
 	}
 	s.store.mu.RUnlock()
 
-	if u == nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "user not found",
-		})
+	if !found {
+		writeNotFound(w, "user not found")
 		return
 	}
-
-	resp := map[string]interface{}{
-		"data": u,
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, &user)
 }
 
 // handleContent returns content by ID.
 func (s *Server) handleContent(w http.ResponseWriter, id string) {
 	s.store.mu.RLock()
 	c, ok := s.store.content[id]
+	var content ifunny.Content
+	if ok {
+		content = *c
+	}
 	s.store.mu.RUnlock()
 
 	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "content not found",
-		})
+		writeNotFound(w, "content not found")
 		return
 	}
-
-	resp := map[string]interface{}{
-		"data": c,
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, &content)
 }
 
 // handleTimeline returns paginated content for a user by ID.
 func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request, userID string) {
 	s.store.mu.RLock()
-	// Find all content by this user
-	var contents []*ifunny.Content
+	var contents []ifunny.Content
 	for _, c := range s.store.content {
 		if c.Creator.ID == userID {
-			contents = append(contents, c)
+			contents = append(contents, *c)
 		}
 	}
 	s.store.mu.RUnlock()
 
-	s.serveContentPage(w, r, contents)
+	servePage(w, r, contents, "content")
 }
 
 // handleTimelineByNick returns paginated content for a user by nick.
 func (s *Server) handleTimelineByNick(w http.ResponseWriter, r *http.Request, nick string) {
 	s.store.mu.RLock()
-	// Find all content by this user
-	var contents []*ifunny.Content
+	var contents []ifunny.Content
 	for _, c := range s.store.content {
 		if c.Creator.Nick == nick {
-			contents = append(contents, c)
+			contents = append(contents, *c)
 		}
 	}
 	s.store.mu.RUnlock()
 
-	s.serveContentPage(w, r, contents)
+	servePage(w, r, contents, "content")
 }
 
 // handleComments returns paginated comments for content (top-level only).
 func (s *Server) handleComments(w http.ResponseWriter, r *http.Request, contentID string) {
 	s.store.mu.RLock()
-	allComments := s.store.comments[contentID]
-	// Filter to top-level comments only (not replies)
-	var topLevel []*ifunny.Comment
-	for _, c := range allComments {
+	var topLevel []ifunny.Comment
+	for _, c := range s.store.comments[contentID] {
 		if !c.IsReply {
-			topLevel = append(topLevel, c)
+			topLevel = append(topLevel, *c)
 		}
 	}
 	s.store.mu.RUnlock()
 
-	s.serveCommentPage(w, r, topLevel)
+	servePage(w, r, topLevel, "comments")
 }
 
 // handleReplies returns paginated replies to a comment.
 func (s *Server) handleReplies(w http.ResponseWriter, r *http.Request, contentID, commentID string) {
 	s.store.mu.RLock()
-	allComments := s.store.comments[contentID]
-	var replies []*ifunny.Comment
-	for _, c := range allComments {
+	var replies []ifunny.Comment
+	for _, c := range s.store.comments[contentID] {
 		if c.IsReply && c.ParentCommID == commentID {
-			replies = append(replies, c)
+			replies = append(replies, *c)
 		}
 	}
 	s.store.mu.RUnlock()
 
-	s.serveReplyPage(w, r, replies)
+	servePage(w, r, replies, "replies")
 }
 
 // handleSmiles returns paginated users who smiled content.
 func (s *Server) handleSmiles(w http.ResponseWriter, r *http.Request, contentID string) {
 	s.store.mu.RLock()
-	smilers := s.store.smiles[contentID]
+	users := copyUsers(s.store.smiles[contentID])
 	s.store.mu.RUnlock()
 
-	s.serveUserPage(w, r, smilers, "users")
+	servePage(w, r, users, "users")
 }
 
 // handleRepublished returns paginated users who republished content.
 func (s *Server) handleRepublished(w http.ResponseWriter, r *http.Request, contentID string) {
 	s.store.mu.RLock()
-	republishers := s.store.replublishers[contentID]
+	users := copyUsers(s.store.republishers[contentID])
 	s.store.mu.RUnlock()
 
-	s.serveUserPage(w, r, republishers, "users")
+	servePage(w, r, users, "users")
 }
 
-// serveContentPage returns a paginated content response.
-func (s *Server) serveContentPage(w http.ResponseWriter, r *http.Request, contents []*ifunny.Content) {
-	limit, cursor := parsePaginationParams(r)
-
-	start := 0
-	if cursor != "" {
-		off, err := strconv.Atoi(cursor)
-		if err == nil {
-			start = off
-		}
+// copyUsers dereferences a slice of user pointers into values. Callers hold
+// s.store.mu so the copy is race-free against concurrent fixture mutation.
+func copyUsers(src []*ifunny.User) []ifunny.User {
+	out := make([]ifunny.User, len(src))
+	for i, u := range src {
+		out[i] = *u
 	}
-
-	if start >= len(contents) {
-		// Empty page
-		resp := map[string]interface{}{
-			"data": map[string]interface{}{
-				"content": map[string]interface{}{
-					"items":  []*ifunny.Content{},
-					"paging": ifunny.Cursor{},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	end := start + limit
-	if end > len(contents) {
-		end = len(contents)
-	}
-
-	items := make([]ifunny.Content, len(contents[start:end]))
-	for i, c := range contents[start:end] {
-		items[i] = *c
-	}
-
-	page := &ifunny.Page[ifunny.Content]{
-		Items: items,
-	}
-
-	if end < len(contents) {
-		nextOffset := strconv.Itoa(end)
-		page.Paging.Cursors.Next = base64.RawURLEncoding.EncodeToString([]byte(nextOffset))
-		page.Paging.HasNext = true
-	}
-
-	resp := map[string]interface{}{
-		"data": map[string]interface{}{
-			"content": page,
-		},
-	}
-	json.NewEncoder(w).Encode(resp)
+	return out
 }
 
-// serveCommentPage returns a paginated comments response.
-func (s *Server) serveCommentPage(w http.ResponseWriter, r *http.Request, comments []*ifunny.Comment) {
-	limit, cursor := parsePaginationParams(r)
+// servePage writes a paginated response wrapping items under key. The cursor
+// is a plain offset into items; HasNext is set when more items remain.
+func servePage[T ifunny.Comment | ifunny.Content | ifunny.User | ifunny.ChatChannel](w http.ResponseWriter, r *http.Request, items []T, key string) {
+	limit, start := parsePagination(r)
 
-	start := 0
-	if cursor != "" {
-		off, err := strconv.Atoi(cursor)
-		if err == nil {
-			start = off
+	page := &ifunny.Page[T]{Items: []T{}}
+	if start < len(items) {
+		end := min(start+limit, len(items))
+		page.Items = items[start:end]
+		if end < len(items) {
+			page.Paging.Cursors.Next = strconv.Itoa(end)
+			page.Paging.HasNext = true
 		}
 	}
 
-	if start >= len(comments) {
-		// Empty page
-		resp := map[string]interface{}{
-			"data": map[string]interface{}{
-				"comments": map[string]interface{}{
-					"items":  []*ifunny.Comment{},
-					"paging": ifunny.Cursor{},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	end := start + limit
-	if end > len(comments) {
-		end = len(comments)
-	}
-
-	items := make([]ifunny.Comment, len(comments[start:end]))
-	for i, c := range comments[start:end] {
-		items[i] = *c
-	}
-
-	page := &ifunny.Page[ifunny.Comment]{
-		Items: items,
-	}
-
-	if end < len(comments) {
-		nextOffset := strconv.Itoa(end)
-		page.Paging.Cursors.Next = base64.RawURLEncoding.EncodeToString([]byte(nextOffset))
-		page.Paging.HasNext = true
-	}
-
-	resp := map[string]interface{}{
-		"data": map[string]interface{}{
-			"comments": page,
-		},
-	}
-	json.NewEncoder(w).Encode(resp)
+	writeData(w, map[string]any{key: page})
 }
 
-// serveReplyPage returns a paginated replies response.
-func (s *Server) serveReplyPage(w http.ResponseWriter, r *http.Request, replies []*ifunny.Comment) {
-	limit, cursor := parsePaginationParams(r)
-
-	start := 0
-	if cursor != "" {
-		off, err := strconv.Atoi(cursor)
-		if err == nil {
-			start = off
-		}
-	}
-
-	if start >= len(replies) {
-		// Empty page
-		resp := map[string]interface{}{
-			"data": map[string]interface{}{
-				"replies": map[string]interface{}{
-					"items":  []*ifunny.Comment{},
-					"paging": ifunny.Cursor{},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	end := start + limit
-	if end > len(replies) {
-		end = len(replies)
-	}
-
-	items := make([]ifunny.Comment, len(replies[start:end]))
-	for i, c := range replies[start:end] {
-		items[i] = *c
-	}
-
-	page := &ifunny.Page[ifunny.Comment]{
-		Items: items,
-	}
-
-	if end < len(replies) {
-		nextOffset := strconv.Itoa(end)
-		page.Paging.Cursors.Next = base64.RawURLEncoding.EncodeToString([]byte(nextOffset))
-		page.Paging.HasNext = true
-	}
-
-	resp := map[string]interface{}{
-		"data": map[string]interface{}{
-			"replies": page,
-		},
-	}
-	json.NewEncoder(w).Encode(resp)
-}
-
-// serveUserPage returns a paginated users response.
-func (s *Server) serveUserPage(w http.ResponseWriter, r *http.Request, users []*ifunny.User, key string) {
-	limit, cursor := parsePaginationParams(r)
-
-	start := 0
-	if cursor != "" {
-		off, err := strconv.Atoi(cursor)
-		if err == nil {
-			start = off
-		}
-	}
-
-	if start >= len(users) {
-		// Empty page
-		resp := map[string]interface{}{
-			"data": map[string]interface{}{
-				key: map[string]interface{}{
-					"items":  []*ifunny.User{},
-					"paging": ifunny.Cursor{},
-				},
-			},
-		}
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	end := start + limit
-	if end > len(users) {
-		end = len(users)
-	}
-
-	items := make([]ifunny.User, len(users[start:end]))
-	for i, u := range users[start:end] {
-		items[i] = *u
-	}
-
-	page := &ifunny.Page[ifunny.User]{
-		Items: items,
-	}
-
-	if end < len(users) {
-		nextOffset := strconv.Itoa(end)
-		page.Paging.Cursors.Next = base64.RawURLEncoding.EncodeToString([]byte(nextOffset))
-		page.Paging.HasNext = true
-	}
-
-	resp := map[string]interface{}{
-		"data": map[string]interface{}{
-			key: page,
-		},
-	}
-	json.NewEncoder(w).Encode(resp)
-}
-
-// parsePaginationParams extracts limit and next cursor from query params.
-func parsePaginationParams(r *http.Request) (limit int, cursor string) {
-	limit = 3 // Default page size for testing
+// parsePagination extracts the page limit and start offset from query params.
+func parsePagination(r *http.Request) (limit, start int) {
+	limit = 3 // Default page size for testing.
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
-	cursor = r.URL.Query().Get("next")
+	if off, err := strconv.Atoi(r.URL.Query().Get("next")); err == nil {
+		start = off
+	}
 	return
+}
+
+// writeData encodes data wrapped in the API's {"data": ...} envelope.
+func writeData(w http.ResponseWriter, data any) {
+	json.NewEncoder(w).Encode(map[string]any{"data": data})
+}
+
+// writeNotFound writes a 404 with a JSON error body.
+func writeNotFound(w http.ResponseWriter, msg string) {
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(map[string]any{"error": msg})
 }
