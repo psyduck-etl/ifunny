@@ -662,7 +662,7 @@ func TestParseUserBy(t *testing.T) {
 // here — it calls GetContent, which is a network operation.
 func TestTagsTransformer(t *testing.T) {
 	t.Run("RichInputTagsPresent", func(t *testing.T) {
-		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		tr, err := tagsTransformer(context.Background(), testParser(withAuth(nil)))
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
@@ -680,7 +680,7 @@ func TestTagsTransformer(t *testing.T) {
 	})
 
 	t.Run("RichInputMixedTypesSkipsNonStrings", func(t *testing.T) {
-		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		tr, err := tagsTransformer(context.Background(), testParser(withAuth(nil)))
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
@@ -698,7 +698,7 @@ func TestTagsTransformer(t *testing.T) {
 	})
 
 	t.Run("RichInputEmptyTagsDrops", func(t *testing.T) {
-		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		tr, err := tagsTransformer(context.Background(), testParser(withAuth(nil)))
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
@@ -712,7 +712,7 @@ func TestTagsTransformer(t *testing.T) {
 	})
 
 	t.Run("RichInputNoTagsNoIDErrors", func(t *testing.T) {
-		tr, err := tagsTransformer(testParser(withAuth(nil)))
+		tr, err := tagsTransformer(context.Background(), testParser(withAuth(nil)))
 		if err != nil {
 			t.Fatalf("bind: %v", err)
 		}
@@ -739,7 +739,7 @@ func TestAuthorTransformerBindErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := authorTransformer(testParser(withAuth(tc.values)))
+			_, err := authorTransformer(context.Background(), testParser(withAuth(tc.values)))
 			if err == nil {
 				t.Fatalf("expected bind error, got nil")
 			}

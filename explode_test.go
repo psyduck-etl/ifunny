@@ -40,7 +40,7 @@ func TestTimelineExplodeSingleUserMultipleContents(t *testing.T) {
 		srv.AddContent(alice)
 	}
 
-	tr, err := timelineTransformer(testParser(withAuth(map[string]any{
+	tr, err := timelineTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"by":     "id",
 		"accept": "string",
 		"emit":   "string",
@@ -83,7 +83,7 @@ func TestTimelineExplodeWithLimit(t *testing.T) {
 		srv.AddContent(alice)
 	}
 
-	tr, err := timelineTransformer(testParser(withAuth(map[string]any{
+	tr, err := timelineTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"by":     "id",
 		"limit":  2,
 		"accept": "string",
@@ -111,7 +111,7 @@ func TestTimelineExplodeEmptyTimeline(t *testing.T) {
 	alice := srv.AddUser("alice")
 	// Don't add any content
 
-	tr, err := timelineTransformer(testParser(withAuth(map[string]any{
+	tr, err := timelineTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"by":     "id",
 		"accept": "string",
 		"emit":   "string",
@@ -138,7 +138,7 @@ func TestTimelineExplodeByNick(t *testing.T) {
 	alice := srv.AddUser("alice")
 	srv.AddContent(alice)
 
-	tr, err := timelineTransformer(testParser(withAuth(map[string]any{
+	tr, err := timelineTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"by":     "nick",
 		"accept": "string",
 		"emit":   "string",
@@ -165,7 +165,7 @@ func TestTimelineExplodeRichEmit(t *testing.T) {
 	alice := srv.AddUser("alice")
 	content := srv.AddContent(alice)
 
-	tr, err := timelineTransformer(testParser(withAuth(map[string]any{
+	tr, err := timelineTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"by":     "id",
 		"accept": "string",
 		"emit":   "json",
@@ -209,7 +209,7 @@ func TestCommentsExplodeSingleContentMultipleComments(t *testing.T) {
 		srv.AddComment(content, bob, "comment")
 	}
 
-	tr, err := commentsTransformer(testParser(withAuth(map[string]any{
+	tr, err := commentsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"accept": "string",
 		"emit":   "json",
 	})))
@@ -240,7 +240,7 @@ func TestCommentsExplodeMaxDepthZero(t *testing.T) {
 	comment := srv.AddComment(content, bob, "main")
 	srv.AddReply(comment, carol, "reply")
 
-	tr, err := commentsTransformer(testParser(withAuth(map[string]any{
+	tr, err := commentsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"max-depth": 0,
 		"accept":    "string",
 		"emit":      "json",
@@ -279,7 +279,7 @@ func TestCommentsExplodeWithNegativeMaxDepth(t *testing.T) {
 	srv.AddReply(comment, carol, "reply 2")
 
 	// max-depth = -1 means no limit (emit all depths)
-	tr, err := commentsTransformer(testParser(withAuth(map[string]any{
+	tr, err := commentsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"max-depth": -1,
 		"accept":    "string",
 		"emit":      "json",
@@ -308,7 +308,7 @@ func TestCommentsExplodeEmptyComments(t *testing.T) {
 	content := srv.AddContent(alice)
 	// Don't add any comments
 
-	tr, err := commentsTransformer(testParser(withAuth(map[string]any{
+	tr, err := commentsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"accept": "string",
 		"emit":   "json",
 	})))
@@ -341,7 +341,7 @@ func TestInteractionsAllEnabled(t *testing.T) {
 	srv.AddSmiler(content, bob)
 	srv.AddRepublisher(content, carol)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"author", "smiles", "republishes"},
 		"accept":       "string",
 		"emit":         "string",
@@ -386,7 +386,7 @@ func TestInteractionsCommentsIncluded(t *testing.T) {
 	srv.AddComment(content, bob, "comment 1")
 	srv.AddComment(content, carol, "comment 2")
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"comments"},
 		"accept":       "string",
 		"emit":         "string",
@@ -408,7 +408,7 @@ func TestInteractionsCommentsIncluded(t *testing.T) {
 
 // TestInteractionsEmptyListFails verifies empty interactions list errors at bind.
 func TestInteractionsEmptyListFails(t *testing.T) {
-	_, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	_, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{},
 		"emit":         "string",
 	})))
@@ -440,7 +440,7 @@ func TestInteractionsMultipleInputsGrouped(t *testing.T) {
 	srv.AddSmiler(content2, eve)
 	srv.AddSmiler(content2, frank)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"author", "smiles"},
 		"accept":       "string",
 		"emit":         "string",
@@ -502,7 +502,7 @@ func TestInteractionsRichEmit(t *testing.T) {
 	content := srv.AddContent(alice)
 	srv.AddSmiler(content, bob)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"smiles"},
 		"accept":       "string",
 		"emit":         "json",

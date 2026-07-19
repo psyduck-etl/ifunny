@@ -105,7 +105,7 @@ func TestInteractionsCtxCancelPropagates(t *testing.T) {
 	// before workers finish, small enough not to make the test slow.
 	srv.SetLatency(50 * time.Millisecond)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"author", "smiles", "republishes", "comments"},
 		"accept":       "string",
 		"emit":         "string",
@@ -160,7 +160,7 @@ func TestInteractionsUpstreamCloseMidflight(t *testing.T) {
 	// Small latency so the "in closed" happens while workers are running.
 	srv.SetLatency(20 * time.Millisecond)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"smiles", "republishes"},
 		"accept":       "string",
 		"emit":         "string",
@@ -212,7 +212,7 @@ func TestInteractionsSubIteratorErrorIsolation(t *testing.T) {
 	// Permanent 500 on any /smiles request.
 	srv.SetError("/smiles", 500, -1)
 
-	tr, err := interactionsTransformer(testParser(withAuth(map[string]any{
+	tr, err := interactionsTransformer(context.Background(), testParser(withAuth(map[string]any{
 		"interactions": []string{"smiles", "republishes", "comments"},
 		"accept":       "string",
 		"emit":         "string",
