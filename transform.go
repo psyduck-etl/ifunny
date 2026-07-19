@@ -80,6 +80,11 @@ func parseUserBy(v string) (byNick bool, err error) {
 // matrix; bindEnrich picks the composition that matches the cell at
 // bind time so the per-record body carries no dispatch overhead.
 //
+// Every primitive takes the stage ctx as its first argument so the
+// per-record API calls it makes are bound by the transformer's context:
+// cancelling the stage aborts an in-flight fetch rather than only firing
+// the emit guard after it returns.
+//
 // extract pulls T's terminal ref (and optionally a hydrated T from a
 // recovery fetch — see the by-nick paths) out of rich input bytes.
 // Called only on the !accept.sparse() cells. Direct json.Unmarshal
@@ -98,9 +103,9 @@ func parseUserBy(v string) (byNick bool, err error) {
 // a hydrated target. (nil, nil) means not-found → drop the record.
 type enrichPlan struct {
 	name    string
-	extract func(data []byte) (targetRef string, target any, err error)
-	resolve func(sourceRef string) (targetRef string, target any, err error)
-	fetch   func(targetRef string) (any, error)
+	extract func(ctx context.Context, data []byte) (targetRef string, target any, err error)
+	resolve func(ctx context.Context, sourceRef string) (targetRef string, target any, err error)
+	fetch   func(ctx context.Context, targetRef string) (any, error)
 }
 
 // bindEnrich composes the correct closure for the accept×emit cell
@@ -126,10 +131,11 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 
 	// frontHalf yields T's terminal ref for one record, plus an
 	// optional pre-hydrated T from a recovery fetch that the rich-out
-	// closure reuses in place of a redundant plan.fetch call.
-	var frontHalf func(data []byte) (string, any, error)
+	// closure reuses in place of a redundant plan.fetch call. It carries
+	// the stage ctx so its fetches abort on cancellation.
+	var frontHalf func(ctx context.Context, data []byte) (string, any, error)
 	if accept.sparse() {
-		frontHalf = func(data []byte) (string, any, error) {
+		frontHalf = func(ctx context.Context, data []byte) (string, any, error) {
 			decoded, err := accept.Decode(data)
 			if err != nil {
 				return "", nil, err
@@ -141,15 +147,15 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 			if ref == "" {
 				return "", nil, nil
 			}
-			return plan.resolve(ref)
+			return plan.resolve(ctx, ref)
 		}
 	} else {
 		frontHalf = plan.extract
 	}
 
 	if emit.sparse() {
-		return sdk.Map(func(data []byte) ([]byte, error) {
-			ref, _, err := frontHalf(data)
+		return mapCtx(func(ctx context.Context, data []byte) ([]byte, error) {
+			ref, _, err := frontHalf(ctx, data)
 			if err != nil || ref == "" {
 				return nil, err
 			}
@@ -157,8 +163,8 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 		}), nil
 	}
 
-	return sdk.Map(func(data []byte) ([]byte, error) {
-		ref, target, err := frontHalf(data)
+	return mapCtx(func(ctx context.Context, data []byte) ([]byte, error) {
+		ref, target, err := frontHalf(ctx, data)
 		if err != nil {
 			return nil, err
 		}
@@ -166,13 +172,50 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 			if ref == "" {
 				return nil, nil
 			}
-			target, err = plan.fetch(ref)
+			target, err = plan.fetch(ctx, ref)
 			if err != nil || target == nil {
 				return nil, err
 			}
 		}
 		return emit.Encode(target)
 	}), nil
+}
+
+// mapCtx is a ctx-aware sdk.Map: it lifts a one-to-one mapping onto the
+// Transformer contract exactly as sdk.Map does — filtering on (nil, nil),
+// reporting an error and dropping the record, closing out on the way out —
+// but hands the stage ctx to fn so per-record API calls are bound by it.
+// sdk.Map's fn takes no ctx, which is why the enrich transformers need
+// this variant to down-propagate cancellation into their fetches.
+func mapCtx(fn func(ctx context.Context, data []byte) ([]byte, error)) sdk.Transformer {
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+		for {
+			select {
+			case data, ok := <-in:
+				if !ok {
+					return
+				}
+				mapped, err := fn(ctx, data)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					continue
+				}
+				if mapped == nil {
+					continue
+				}
+				select {
+				case out <- mapped:
+				case <-ctx.Done():
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
 }
 
 // authorTransformer builds the ifunny-author transformer. It maps a
@@ -249,9 +292,10 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	}
 
 	// getUser hydrates the target User by id or nick, applying the
-	// not-found-drops convention.
-	getUser := func(req compose.Request) (*ifunny.User, error) {
-		u, err := client.GetUser(context.Background(), req)
+	// not-found-drops convention. ctx is the stage context so a cancelled
+	// stage aborts the in-flight lookup.
+	getUser := func(ctx context.Context, req compose.Request) (*ifunny.User, error) {
+		u, err := client.GetUser(ctx, req)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -264,15 +308,15 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	// recoverUser hydrates a User by id when the source had the id but
 	// no nick. It returns the hydrated User so the rich-out path can
 	// short-circuit fetch; callers read u.Nick themselves.
-	recoverUser := func(id string) (*ifunny.User, error) {
-		return getUser(compose.UserByID(id))
+	recoverUser := func(ctx context.Context, id string) (*ifunny.User, error) {
+		return getUser(ctx, compose.UserByID(id))
 	}
 
 	// pickRef reads the emit-by axis field off any Authored source.
 	// Under by=nick with an empty nick, it recovers via GetUser and
 	// returns the hydrated user for short-circuit; if the id is also
 	// empty, the record drops.
-	pickRef := func(a ifunny.Authored) (string, any, error) {
+	pickRef := func(ctx context.Context, a ifunny.Authored) (string, any, error) {
 		if !byNick {
 			id := a.AuthorID()
 			return id, nil, nil
@@ -284,7 +328,7 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		if id == "" {
 			return "", nil, nil
 		}
-		u, err := recoverUser(id)
+		u, err := recoverUser(ctx, id)
 		if err != nil || u == nil {
 			return "", nil, err
 		}
@@ -293,25 +337,25 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 	plan := enrichPlan{
 		name: "ifunny-author",
-		fetch: func(ref string) (any, error) {
+		fetch: func(ctx context.Context, ref string) (any, error) {
 			if byNick {
-				return getUser(compose.UserByNick(ref))
+				return getUser(ctx, compose.UserByNick(ref))
 			}
-			return getUser(compose.UserByID(ref))
+			return getUser(ctx, compose.UserByID(ref))
 		},
 	}
 
 	switch config.Source {
 	case "content":
-		plan.extract = func(data []byte) (string, any, error) {
+		plan.extract = func(ctx context.Context, data []byte) (string, any, error) {
 			var s authoredContent
 			if err := json.Unmarshal(data, &s); err != nil {
 				return "", nil, err
 			}
-			return pickRef(&s)
+			return pickRef(ctx, &s)
 		}
-		plan.resolve = func(contentID string) (string, any, error) {
-			content, err := client.GetContent(context.Background(), contentID)
+		plan.resolve = func(ctx context.Context, contentID string) (string, any, error) {
+			content, err := client.GetContent(ctx, contentID)
 			if err != nil {
 				return "", nil, err
 			}
@@ -324,27 +368,27 @@ func authorTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			if content.Creator.Nick != "" {
 				return content.Creator.Nick, nil, nil
 			}
-			u, err := recoverUser(content.Creator.ID)
+			u, err := recoverUser(ctx, content.Creator.ID)
 			if err != nil || u == nil {
 				return "", nil, err
 			}
 			return u.Nick, u, nil
 		}
 	case "comment":
-		plan.extract = func(data []byte) (string, any, error) {
+		plan.extract = func(ctx context.Context, data []byte) (string, any, error) {
 			var s authoredComment
 			if err := json.Unmarshal(data, &s); err != nil {
 				return "", nil, err
 			}
-			return pickRef(&s)
+			return pickRef(ctx, &s)
 		}
 	case "chat":
-		plan.extract = func(data []byte) (string, any, error) {
+		plan.extract = func(ctx context.Context, data []byte) (string, any, error) {
 			var s authoredChatEvent
 			if err := json.Unmarshal(data, &s); err != nil {
 				return "", nil, err
 			}
-			return pickRef(&s)
+			return pickRef(ctx, &s)
 		}
 	default:
 		return nil, fmt.Errorf("ifunny-author: source is required (one of \"content\", \"comment\", \"chat\"); got %q", config.Source)
@@ -535,8 +579,8 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	fetchContent := func(id string) (any, error) {
-		content, err := client.GetContent(context.Background(), id)
+	fetchContent := func(ctx context.Context, id string) (any, error) {
+		content, err := client.GetContent(ctx, id)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -548,7 +592,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 	plan := enrichPlan{
 		name: "ifunny-content",
-		extract: func(data []byte) (string, any, error) {
+		extract: func(_ context.Context, data []byte) (string, any, error) {
 			var s struct {
 				ID string `json:"id"`
 			}
@@ -557,7 +601,7 @@ func contentTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 			return s.ID, nil, nil
 		},
-		resolve: func(ref string) (string, any, error) { return ref, nil, nil },
+		resolve: func(_ context.Context, ref string) (string, any, error) { return ref, nil, nil },
 		fetch:   fetchContent,
 	}
 
@@ -637,8 +681,8 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	getUser := func(req compose.Request) (*ifunny.User, error) {
-		u, err := client.GetUser(context.Background(), req)
+	getUser := func(ctx context.Context, req compose.Request) (*ifunny.User, error) {
+		u, err := client.GetUser(ctx, req)
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -648,9 +692,9 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return u, nil
 	}
 
-	var extract func(data []byte) (string, any, error)
+	var extract func(ctx context.Context, data []byte) (string, any, error)
 	if byNick {
-		extract = func(data []byte) (string, any, error) {
+		extract = func(ctx context.Context, data []byte) (string, any, error) {
 			var s struct {
 				ID   string `json:"id"`
 				Nick string `json:"nick"`
@@ -664,14 +708,14 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			if s.ID == "" {
 				return "", nil, nil
 			}
-			u, err := getUser(compose.UserByID(s.ID))
+			u, err := getUser(ctx, compose.UserByID(s.ID))
 			if err != nil || u == nil {
 				return "", nil, err
 			}
 			return u.Nick, u, nil
 		}
 	} else {
-		extract = func(data []byte) (string, any, error) {
+		extract = func(_ context.Context, data []byte) (string, any, error) {
 			var s struct {
 				ID string `json:"id"`
 			}
@@ -685,12 +729,12 @@ func userTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 	plan := enrichPlan{
 		name:    "ifunny-user",
 		extract: extract,
-		resolve: func(ref string) (string, any, error) { return ref, nil, nil },
-		fetch: func(ref string) (any, error) {
+		resolve: func(_ context.Context, ref string) (string, any, error) { return ref, nil, nil },
+		fetch: func(ctx context.Context, ref string) (any, error) {
 			if byNick {
-				return getUser(compose.UserByNick(ref))
+				return getUser(ctx, compose.UserByNick(ref))
 			}
-			return getUser(compose.UserByID(ref))
+			return getUser(ctx, compose.UserByID(ref))
 		},
 	}
 
@@ -755,8 +799,8 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 		return nil, err
 	}
 
-	fetchChannel := func(name string) (any, error) {
-		channel, err := chat.GetChannel(context.Background(), compose.GetChannel(name))
+	fetchChannel := func(ctx context.Context, name string) (any, error) {
+		channel, err := chat.GetChannel(ctx, compose.GetChannel(name))
 		if err != nil {
 			if apiErr, ok := ifunny.AsAPIError(err); ok && apiErr.Kind == "not_found" {
 				return nil, nil
@@ -768,7 +812,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 
 	plan := enrichPlan{
 		name: "ifunny-channel",
-		extract: func(data []byte) (string, any, error) {
+		extract: func(_ context.Context, data []byte) (string, any, error) {
 			var s struct {
 				Name string `json:"name"`
 			}
@@ -777,7 +821,7 @@ func channelTransformer(parse sdk.Parser) (sdk.Transformer, error) {
 			}
 			return s.Name, nil, nil
 		},
-		resolve: func(ref string) (string, any, error) { return ref, nil, nil },
+		resolve: func(_ context.Context, ref string) (string, any, error) { return ref, nil, nil },
 		fetch:   fetchChannel,
 	}
 

@@ -226,7 +226,7 @@ type enrichCounters struct {
 func fakePlan(name string, c *enrichCounters, resolved *testEntity, shortCircuit bool) enrichPlan {
 	return enrichPlan{
 		name: name,
-		extract: func(data []byte) (string, any, error) {
+		extract: func(_ context.Context, data []byte) (string, any, error) {
 			c.extractCalls++
 			var s struct {
 				TargetRef string `json:"target-ref"`
@@ -244,11 +244,11 @@ func fakePlan(name string, c *enrichCounters, resolved *testEntity, shortCircuit
 			}
 			return s.TargetRef, nil, nil
 		},
-		resolve: func(ref string) (string, any, error) {
+		resolve: func(_ context.Context, ref string) (string, any, error) {
 			c.resolveCalls++
 			return ref, nil, nil
 		},
-		fetch: func(ref string) (any, error) {
+		fetch: func(_ context.Context, ref string) (any, error) {
 			c.fetchCalls++
 			if resolved == nil {
 				return nil, nil
@@ -478,8 +478,8 @@ func TestBindEnrichNotFoundDrops(t *testing.T) {
 func TestBindEnrichUnfetchableSparseErrors(t *testing.T) {
 	plan := enrichPlan{
 		name:    "test",
-		extract: func([]byte) (string, any, error) { return "", nil, nil },
-		fetch:   func(string) (any, error) { return nil, nil },
+		extract: func(context.Context, []byte) (string, any, error) { return "", nil, nil },
+		fetch:   func(context.Context, string) (any, error) { return nil, nil },
 	}
 	_, err := bindEnrich(testAccept("string"), testEmit("json"), plan)
 	if err == nil {
@@ -491,7 +491,7 @@ func TestBindEnrichUnfetchableSparseErrors(t *testing.T) {
 func TestBindEnrichUnfetchableRichOK(t *testing.T) {
 	plan := enrichPlan{
 		name: "test",
-		extract: func(data []byte) (string, any, error) {
+		extract: func(_ context.Context, data []byte) (string, any, error) {
 			var s struct {
 				TargetRef string `json:"target-ref"`
 			}
@@ -500,7 +500,7 @@ func TestBindEnrichUnfetchableRichOK(t *testing.T) {
 			}
 			return s.TargetRef, nil, nil
 		},
-		fetch: func(string) (any, error) { return nil, nil },
+		fetch: func(context.Context, string) (any, error) { return nil, nil },
 	}
 	tr, err := bindEnrich(testAccept("json"), testEmit("string"), plan)
 	if err != nil {
@@ -521,8 +521,8 @@ func TestBindEnrichExtractErrorPropagates(t *testing.T) {
 	sentinel := errors.New("shadow decode failed")
 	plan := enrichPlan{
 		name:    "test",
-		extract: func([]byte) (string, any, error) { return "", nil, sentinel },
-		fetch:   func(string) (any, error) { return nil, nil },
+		extract: func(context.Context, []byte) (string, any, error) { return "", nil, sentinel },
+		fetch:   func(context.Context, string) (any, error) { return nil, nil },
 	}
 	tr, err := bindEnrich(testAccept("json"), testEmit("json"), plan)
 	if err != nil {
@@ -530,6 +530,49 @@ func TestBindEnrichExtractErrorPropagates(t *testing.T) {
 	}
 	if _, err := runOne(t, tr, []byte(`{}`)); !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want sentinel", err)
+	}
+}
+
+// The stage ctx handed to a bindEnrich transformer must reach the plan's
+// per-record fetch, so cancelling the stage aborts an in-flight API call
+// rather than only firing the emit guard afterward. This pins that
+// down-propagation: fetch sees the exact ctx the transformer was run with.
+func TestBindEnrichThreadsStageCtxToFetch(t *testing.T) {
+	type ctxKey struct{}
+	stageCtx := context.WithValue(t.Context(), ctxKey{}, "stage")
+
+	var gotFetch, gotExtract context.Context
+	plan := enrichPlan{
+		name: "test",
+		extract: func(ctx context.Context, _ []byte) (string, any, error) {
+			gotExtract = ctx
+			return "abc", nil, nil
+		},
+		fetch: func(ctx context.Context, ref string) (any, error) {
+			gotFetch = ctx
+			return &testEntity{ID: ref}, nil
+		},
+	}
+	tr, err := bindEnrich(testAccept("json"), testEmit("json"), plan)
+	if err != nil {
+		t.Fatalf("bindEnrich: %v", err)
+	}
+
+	in := make(chan []byte, 1)
+	out := make(chan []byte)
+	errs := make(chan error, 1)
+	in <- []byte(`{"id":"abc"}`)
+	close(in)
+
+	go tr(stageCtx, in, out, errs)
+	for range out { //nolint:revive // drain to completion
+	}
+
+	if gotExtract == nil || gotExtract.Value(ctxKey{}) != "stage" {
+		t.Errorf("extract ctx = %v, want the stage ctx", gotExtract)
+	}
+	if gotFetch == nil || gotFetch.Value(ctxKey{}) != "stage" {
+		t.Errorf("fetch ctx = %v, want the stage ctx", gotFetch)
 	}
 }
 

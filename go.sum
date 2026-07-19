@@ -7,10 +7,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fatih/color v1.13.0 h1:8LOYc1KYPPmyKMuN8QV2DNRWNbLo6LZ0iLs8+mlH53w=
 github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
-github.com/gastrodon/turnpike v1.1.0 h1:BWKVeUFruClO7Oh4Un3bGk2O8RySgaXWWy4ZkB7CSrI=
-github.com/gastrodon/turnpike v1.1.0/go.mod h1:Awtmr4/Gy1p2P1PIVdO7cf3QiafNxVy5vpTAsqrkjKY=
-github.com/gastrodon/turnpike v1.1.1-0.20260717164209-4ba6aaf4e2c5 h1:gDF/DPQCpowLWcs5Y2x+utcYAFQHKjxrZKOxfe5vL2I=
-github.com/gastrodon/turnpike v1.1.1-0.20260717164209-4ba6aaf4e2c5/go.mod h1:fLN3ul3N22YFIS+3dHI5ndR+C85TPorqd1scza8NioQ=
+github.com/gastrodon/turnpike v1.2.0 h1:ug51VXeni3/nfS0v4cdWPnzUpOJI4eiSihzUplj2H9o=
+github.com/gastrodon/turnpike v1.2.0/go.mod h1:fLN3ul3N22YFIS+3dHI5ndR+C85TPorqd1scza8NioQ=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
 github.com/go-logr/stdr v1.2.2 h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=
@@ -50,10 +48,8 @@ github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyua
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/oklog/run v1.1.0 h1:GEenZ1cK0+q0+wsJew9qUg/DyD8k3JzYsZAi5gYi2mA=
 github.com/oklog/run v1.1.0/go.mod h1:sVPdnTZT1zYwAJeCMu2Th4T21pA3FPOQRfWjQlk7DVU=
-github.com/open-ifunny/ifunny-go v0.1.4 h1:j2rEfZW4WTn8i0gnnZXfcYA6PBSziWoPN4j1b4g7tF0=
-github.com/open-ifunny/ifunny-go v0.1.4/go.mod h1:yq3qwrY4DSHkQolejEapLKEHHgIg+rJoE4U1iYjB4fw=
-github.com/open-ifunny/ifunny-go v0.1.5-0.20260717164726-1cc8ed69dbb8 h1:lA9futpmKSdccvhDYC5T57SG05PD4k4Zt23ICnNl2Ug=
-github.com/open-ifunny/ifunny-go v0.1.5-0.20260717164726-1cc8ed69dbb8/go.mod h1:xzhML3OINBZQTTTBdG4xy4l+oaSp/vlsY5DRDq6wnXE=
+github.com/open-ifunny/ifunny-go v0.2.0 h1:UNAAhgljStgFbBzHWl0wgftdOl/2v17GDhTG8Mosv7U=
+github.com/open-ifunny/ifunny-go v0.2.0/go.mod h1:OOhlFEcOlMdEza6RCVR9uGefadBQ328bnS+zzmuecXs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/psyduck-etl/sdk v0.6.0 h1:IyPkkuB0JoYW7iz8MasiMF6GOxXh1L5JzsHey0YL6YY=
