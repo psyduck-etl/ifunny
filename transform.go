@@ -154,7 +154,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 	}
 
 	if emit.sparse() {
-		return mapCtx(func(ctx context.Context, data []byte) ([]byte, error) {
+		return sdk.MapContext(func(ctx context.Context, data []byte) ([]byte, error) {
 			ref, _, err := frontHalf(ctx, data)
 			if err != nil || ref == "" {
 				return nil, err
@@ -163,7 +163,7 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 		}), nil
 	}
 
-	return mapCtx(func(ctx context.Context, data []byte) ([]byte, error) {
+	return sdk.MapContext(func(ctx context.Context, data []byte) ([]byte, error) {
 		ref, target, err := frontHalf(ctx, data)
 		if err != nil {
 			return nil, err
@@ -179,43 +179,6 @@ func bindEnrich(accept *acceptConfig, emit *emitConfig, plan enrichPlan) (sdk.Tr
 		}
 		return emit.Encode(target)
 	}), nil
-}
-
-// mapCtx is a ctx-aware sdk.Map: it lifts a one-to-one mapping onto the
-// Transformer contract exactly as sdk.Map does — filtering on (nil, nil),
-// reporting an error and dropping the record, closing out on the way out —
-// but hands the stage ctx to fn so per-record API calls are bound by it.
-// sdk.Map's fn takes no ctx, which is why the enrich transformers need
-// this variant to down-propagate cancellation into their fetches.
-func mapCtx(fn func(ctx context.Context, data []byte) ([]byte, error)) sdk.Transformer {
-	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
-		defer close(out)
-		for {
-			select {
-			case data, ok := <-in:
-				if !ok {
-					return
-				}
-				mapped, err := fn(ctx, data)
-				if err != nil {
-					if !sendErr(ctx, errs, err) {
-						return
-					}
-					continue
-				}
-				if mapped == nil {
-					continue
-				}
-				select {
-				case out <- mapped:
-				case <-ctx.Done():
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
 }
 
 // authorTransformer builds the ifunny-author transformer. It maps a
