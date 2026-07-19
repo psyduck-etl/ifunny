@@ -6,19 +6,6 @@ import (
 	"github.com/psyduck-etl/sdk/data"
 )
 
-// stringy reports whether spec names the "string" codec — the one that
-// carries a bare terminal reference per record (a content id, user id,
-// channel name) rather than a discrete structured object. Only the literal
-// "string" spec qualifies; discrete codecs (json, yaml, ...) do not.
-//
-// The enrich transformers branch on stringy to decide whether to emit the
-// full object or just its terminal reference, and whether to interpret
-// input as a bare id or as a decoded map from which rich fields can
-// short-circuit the API.
-func stringy(spec string) bool {
-	return spec == "string"
-}
-
 // acceptConfig is a backward-compatibility alias for data.InputCodec.
 // See data.InputCodec for the canonical documentation and usage examples.
 type acceptConfig = data.InputCodec
