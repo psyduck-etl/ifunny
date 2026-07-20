@@ -52,6 +52,8 @@ github.com/open-ifunny/ifunny-go v0.2.0 h1:UNAAhgljStgFbBzHWl0wgftdOl/2v17GDhTG8
 github.com/open-ifunny/ifunny-go v0.2.0/go.mod h1:OOhlFEcOlMdEza6RCVR9uGefadBQ328bnS+zzmuecXs=
 github.com/open-ifunny/ifunny-go v0.2.1-0.20260719202528-6ff2f00b19ef h1:J9OlfnVZE8OixDk+PhIAKSONORhLcqTGNEe4bIXVGCo=
 github.com/open-ifunny/ifunny-go v0.2.1-0.20260719202528-6ff2f00b19ef/go.mod h1:OOhlFEcOlMdEza6RCVR9uGefadBQ328bnS+zzmuecXs=
+github.com/open-ifunny/ifunny-go v0.2.1-0.20260720200458-1d9f799872c0 h1:XZXALMCzKc/scFSYe4uvKuw/mMkyUntwNwKz1Px0mto=
+github.com/open-ifunny/ifunny-go v0.2.1-0.20260720200458-1d9f799872c0/go.mod h1:OOhlFEcOlMdEza6RCVR9uGefadBQ328bnS+zzmuecXs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/psyduck-etl/sdk v0.6.2 h1:Pz+kgqsGsgQ6dY1SvRk06qldIr+7M7libiv6SOBBLw4=
