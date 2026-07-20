@@ -9,23 +9,25 @@ import (
 )
 
 // feedConfig configures ifunny-feed. Feed names a global iFunny feed such
-// as "featured" or "collective". TailPaging is the number of IDs to retain in
-// the collective feed's cursor (the size cliff mitigation). Set to the page
-// size (typically 30) to keep cursor constant-size. 0 disables tail-paging.
+// as "featured" or "collective". PerPage sets the page size, and for the
+// collective feed it also sets the tail-cliff cursor length to the same value
+// (the size cliff mitigation) — an N-item page carries an N-ID cursor. 0 uses
+// the API default page size (30) and, for collective, disables tail-paging.
 type feedConfig struct {
 	authConfig
 	emitConfig
-	Feed       string `psy:"feed"`
-	TailPaging int    `psy:"tail-paging"`
+	Feed    string `psy:"feed"`
+	PerPage int    `psy:"per-page"`
 }
 
 // produceFeed builds the ifunny-feed producer. It walks a global iFunny
 // feed (featured, collective, etc.) and emits each post as a Content entity
 // encoded via codec (default "json"). The collective feed uses hardened
 // pagination to avoid the size cliff: the cursor is posted in the body, and
-// each page token is truncated to the last tail-paging IDs. Set tail-paging
-// to the page size (typically 30) to keep the cursor constant-size; 0
-// disables tail-paging (disables truncation while keeping body placement).
+// each page token is truncated to the last per-page IDs. per-page sets both
+// the page size and, for collective, the tail-cliff cursor length in lockstep
+// (typically 30) to keep the cursor constant-size; 0 uses the default page
+// size and disables truncation while keeping body placement.
 //
 // Example (featured feed):
 //
@@ -68,11 +70,15 @@ func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		// For collective feed with hardened pagination enabled, use Collective().
-		// For all other feeds or collective without tail-paging, use NamedFeed().
+		// For the collective feed with per-page set, use Collective(): per-page
+		// couples the two knobs — the request page size (Limit) and the
+		// tail-cliff cursor length (TailPager) are set to the same value, so an
+		// N-item page carries an N-ID cursor. Any other feed, or collective with
+		// per-page unset, uses NamedFeed (default page size, verbatim cursor).
 		var feed compose.Feed
-		if config.Feed == "collective" && config.TailPaging > 0 {
-			feed = compose.Collective(config.TailPaging)
+		if config.Feed == "collective" && config.PerPage > 0 {
+			feed = compose.Collective(config.PerPage)
+			feed.Limit = config.PerPage
 		} else {
 			feed = compose.NamedFeed(config.Feed)
 		}
