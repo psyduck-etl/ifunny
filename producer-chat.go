@@ -57,7 +57,7 @@ func produceChatHistory(ctx context.Context, parse sdk.Parser) (sdk.Producer, er
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		iter := chat.IterMessages(ctx, compose.ListMessages(config.Channel, 30, compose.NoPage[int]()))
+		iter := chat.IterMessages(ctx, compose.ListMessages(config.Channel, 30, compose.NONE, 0))
 		produceIter(ctx, iter, send, errs, &config.emitConfig)
 	}, nil
 }

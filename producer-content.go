@@ -4,24 +4,30 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-ifunny/ifunny-go/compose"
 	"github.com/psyduck-etl/sdk"
 )
 
 // feedConfig configures ifunny-feed. Feed names a global iFunny feed such
-// as "featured" or "collective".
+// as "featured" or "collective". TailPaging is the number of IDs to retain in
+// the collective feed's cursor (the size cliff mitigation). Set to the page
+// size (typically 30) to keep cursor constant-size. 0 disables tail-paging.
 type feedConfig struct {
 	authConfig
 	emitConfig
-	Feed string `psy:"feed"`
+	Feed       string `psy:"feed"`
+	TailPaging int    `psy:"tail-paging"`
 }
 
 // produceFeed builds the ifunny-feed producer. It walks a global iFunny
 // feed (featured, collective, etc.) and emits each post as a Content entity
-// encoded via codec (default "json"). iFunny serves the collective feed over
-// POST where every other feed is a GET; the ifunny-go client handles that
-// transparently, so feed = "collective" just works.
+// encoded via codec (default "json"). The collective feed uses hardened
+// pagination to avoid the size cliff: the cursor is posted in the body, and
+// each page token is truncated to the last tail-paging IDs. Set tail-paging
+// to the page size (typically 30) to keep the cursor constant-size; 0
+// disables tail-paging (disables truncation while keeping body placement).
 //
-// Example:
+// Example (featured feed):
 //
 //	produce "ifunny-feed" "featured" {
 //	  auth-bearer = env.IFUNNY_BEARER
@@ -32,6 +38,19 @@ type feedConfig struct {
 //	  feed       = "featured"
 //	  emit       = "json"
 //	  stop-after = 100
+//	}
+//
+// Example (collective with hardened pagination):
+//
+//	produce "ifunny-feed" "collective" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  feed         = "collective"
+//	  tail-paging  = 30
+//	  emit         = "json"
 //	}
 func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	config := &feedConfig{emitConfig: emitConfig{Emit: "json"}}
@@ -49,7 +68,15 @@ func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		produceIter(ctx, client.IterFeed(ctx, config.Feed), send, errs, &config.emitConfig)
+		// For collective feed with hardened pagination enabled, use Collective().
+		// For all other feeds or collective without tail-paging, use NamedFeed().
+		var feed compose.Feed
+		if config.Feed == "collective" && config.TailPaging > 0 {
+			feed = compose.Collective(config.TailPaging)
+		} else {
+			feed = compose.NamedFeed(config.Feed)
+		}
+		produceIter(ctx, client.IterContent(ctx, feed), send, errs, &config.emitConfig)
 	}, nil
 }
 
