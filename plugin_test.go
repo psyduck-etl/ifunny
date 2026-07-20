@@ -691,6 +691,19 @@ func TestFeedConfigPageParse(t *testing.T) {
 	})
 }
 
+// TestProduceFeedFirstRequiresCollective pins the bind-time refusal: page.first
+// seeds the collective cursor and is meaningless on any other feed, so it must
+// error rather than silently issue a malformed request.
+func TestProduceFeedFirstRequiresCollective(t *testing.T) {
+	_, err := produceFeed(context.Background(), testParser(withAuth(map[string]any{
+		"feed": "featured",
+		"page": map[string]any{"first": []any{"1", "2"}},
+	})))
+	if err == nil || !strings.Contains(err.Error(), "page.first is only supported for the collective feed") {
+		t.Fatalf("err = %v, want page.first rejection", err)
+	}
+}
+
 // TestTagsTransformer exercises the bind-level refusals and the per-record
 // paths that don't reach the iFunny API (rich input carrying tags or an
 // unfetchable no-id map). The id-fallback path is intentionally not tested

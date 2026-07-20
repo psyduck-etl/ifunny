@@ -84,6 +84,13 @@ func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 		return nil, err
 	}
 
+	// page.first seeds the collective cursor's ID exclusion set, which only the
+	// collective feed exposes. On any other feed it would post a nonsensical
+	// ID-blob cursor, so reject it at bind rather than emitting a bad request.
+	if len(config.Page.First) > 0 && config.Feed != "collective" {
+		return nil, fmt.Errorf("ifunny-feed: page.first is only supported for the collective feed, not %q", config.Feed)
+	}
+
 	if err := config.emitConfig.Bind(); err != nil {
 		return nil, err
 	}
