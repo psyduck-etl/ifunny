@@ -89,10 +89,15 @@ func defaultClientFor(config *authConfig) (*ifunny.Client, error) {
 		return nil, err
 	}
 
+	// Every constructed client retries upstream 429s with backoff (see
+	// backoff.go). One retrying http.Client is shared across the mint +
+	// make calls the basic path may issue.
+	opts := []ifunny.Option{ifunny.WithHTTPClient(retryingHTTPClient())}
+
 	if config.AuthBearer != "" {
-		return ifunny.MakeClient(context.Background(), config.AuthBearer, ua)
+		return ifunny.MakeClient(context.Background(), config.AuthBearer, ua, opts...)
 	}
-	return basicClient(config.AuthBasic, ua)
+	return basicClient(config.AuthBasic, ua, opts...)
 }
 
 // basicClient resolves the auth-basic value into a client:
@@ -101,18 +106,18 @@ func defaultClientFor(config *authConfig) (*ifunny.Client, error) {
 //     then persist. A cached token is assumed still valid — invalidate by
 //     removing the cache file (see basicCachePath).
 //   - anything else:    treat the value as an already-primed literal token.
-func basicClient(auth string, ua ifunny.UserAgent) (*ifunny.Client, error) {
+func basicClient(auth string, ua ifunny.UserAgent, opts ...ifunny.Option) (*ifunny.Client, error) {
 	switch auth {
 	case "generate":
-		return mintPrimedClient(ua)
+		return mintPrimedClient(ua, opts...)
 	case "generate-cache":
 		if token, ok, err := loadCachedBasic(); err != nil {
 			return nil, fmt.Errorf("read basic-token cache: %w", err)
 		} else if ok {
-			return ifunny.MakeClientBasic(token, ua)
+			return ifunny.MakeClientBasic(token, ua, opts...)
 		}
 
-		client, token, err := mintPrimedClientWithToken(ua)
+		client, token, err := mintPrimedClientWithToken(ua, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -121,24 +126,24 @@ func basicClient(auth string, ua ifunny.UserAgent) (*ifunny.Client, error) {
 		}
 		return client, nil
 	default:
-		return ifunny.MakeClientBasic(auth, ua)
+		return ifunny.MakeClientBasic(auth, ua, opts...)
 	}
 }
 
 // mintPrimedClient mints a fresh basic token, builds a client, and primes it.
-func mintPrimedClient(ua ifunny.UserAgent) (*ifunny.Client, error) {
-	client, _, err := mintPrimedClientWithToken(ua)
+func mintPrimedClient(ua ifunny.UserAgent, opts ...ifunny.Option) (*ifunny.Client, error) {
+	client, _, err := mintPrimedClientWithToken(ua, opts...)
 	return client, err
 }
 
 // mintPrimedClientWithToken is mintPrimedClient plus the raw token, so the
 // cache path can persist it after priming.
-func mintPrimedClientWithToken(ua ifunny.UserAgent) (*ifunny.Client, string, error) {
+func mintPrimedClientWithToken(ua ifunny.UserAgent, opts ...ifunny.Option) (*ifunny.Client, string, error) {
 	basic, err := ifunny.GenerateBasic()
 	if err != nil {
 		return nil, "", fmt.Errorf("generate basic token: %w", err)
 	}
-	client, err := ifunny.MakeClientBasic(basic, ua)
+	client, err := ifunny.MakeClientBasic(basic, ua, opts...)
 	if err != nil {
 		return nil, "", err
 	}
