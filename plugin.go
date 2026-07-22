@@ -25,6 +25,28 @@ func Plugin() sdk.Plugin {
 					Type:        sdk.TypeString,
 					Required:    true,
 				},
+				&sdk.Spec{
+					Name:        "page",
+					Description: "pagination knobs for the feed",
+					Type:        sdk.TypeObject,
+					Fields: []*sdk.Spec{
+						{
+							Name:        "size",
+							Description: "page size; for collective it also sets the tail-cliff cursor length to the same value. 0 uses the API default (30) and disables tail-paging",
+							Type:        sdk.TypeInt,
+							Default:     "0",
+						},
+						{
+							Name:        "first",
+							Description: "content ids to seed the starting cursor with (collective only), so iteration resumes past them; empty starts from the top of the feed",
+							Type:        sdk.TypeList,
+							Default:     "[]",
+							ElemType: &sdk.Spec{
+								Type: sdk.TypeString,
+							},
+						},
+					},
+				},
 				emitSpec(),
 			),
 		},

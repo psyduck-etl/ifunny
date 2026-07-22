@@ -84,7 +84,7 @@ type expectedResource struct {
 }
 
 var expectedResources = map[string]expectedResource{
-	"ifunny-feed":             {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "emit"}},
+	"ifunny-feed":             {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "feed", "page", "emit"}},
 	"ifunny-timeline":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "by-id", "by-nick", "emit"}},
 	"ifunny-explore":          {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "compilation", "kind", "emit"}},
 	"ifunny-comments":         {sdk.PRODUCER, []string{"auth-basic", "auth-bearer", "user-agent", "content", "emit"}},
@@ -653,6 +653,54 @@ func TestParseUserBy(t *testing.T) {
 				t.Errorf("byNick = %v, want %v", got, tc.byNick)
 			}
 		})
+	}
+}
+
+// TestFeedConfigPageParse pins that the nested page = { size, first } block
+// decodes into the pageConfig struct, and that an omitted block leaves the
+// backwards-compatible zero value (size 0, no first IDs).
+func TestFeedConfigPageParse(t *testing.T) {
+	t.Run("SizeAndFirst", func(t *testing.T) {
+		var c feedConfig
+		err := testParser(map[string]any{
+			"feed": "collective",
+			"page": map[string]any{
+				"size":  10,
+				"first": []any{"1", "2", "3"},
+			},
+		})(&c)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if c.Page.Size != 10 {
+			t.Errorf("size = %d, want 10", c.Page.Size)
+		}
+		if want := []string{"1", "2", "3"}; !equalStrings(c.Page.First, want) {
+			t.Errorf("first = %v, want %v", c.Page.First, want)
+		}
+	})
+
+	t.Run("OmittedBlockIsZeroValue", func(t *testing.T) {
+		var c feedConfig
+		if err := testParser(map[string]any{"feed": "featured"})(&c); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if c.Page.Size != 0 || len(c.Page.First) != 0 {
+			t.Errorf("page = %+v, want zero value", c.Page)
+		}
+	})
+}
+
+// TestProduceFeedFirstRequiresCollective pins the bind-time refusal: page.first
+// seeds the collective cursor and is meaningless on any other feed, so it must
+// error rather than silently issue a malformed request.
+func TestProduceFeedFirstRequiresCollective(t *testing.T) {
+	_, err := produceFeed(context.Background(), testParser(withAuth(map[string]any{
+		"feed": "featured",
+		"page": map[string]any{"first": []any{"1", "2"}},
+	})))
+	if err == nil || !strings.Contains(err.Error(), "page.first is only supported for the collective feed") {
+		t.Fatalf("err = %v, want page.first rejection", err)
 	}
 }
 
