@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/open-ifunny/ifunny-go v0.2.1-0.20260720200458-1d9f799872c0
+	github.com/open-ifunny/ifunny-go v0.2.1
 	github.com/psyduck-etl/sdk v0.6.2
 )
 
