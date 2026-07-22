@@ -31,14 +31,15 @@ type pageConfig struct {
 
 // produceFeed builds the ifunny-feed producer. It walks a global iFunny
 // feed (featured, collective, etc.) and emits each post as a Content entity
-// encoded via codec (default "json"). The collective feed uses hardened
-// pagination to avoid the size cliff: the cursor is posted in the body, and
-// each page token is truncated to the last page.size IDs. page.size sets both
-// the page size and, for collective, the tail-cliff cursor length in lockstep
-// (typically 30) to keep the cursor constant-size; 0 uses the default page
-// size and disables truncation while keeping body placement. page.first seeds
-// the collective cursor with a list of already-seen content IDs so iteration
-// begins past them; empty (the default) starts from the top of the feed.
+// encoded via codec (default "json"). The collective feed mitigates the size
+// cliff by coupling page size to tail-cliff cursor truncation: the cursor is
+// posted in the body, and each page token is truncated to the last page.size
+// IDs to keep the cursor constant-size. page.size sets both the page size and,
+// for collective, the tail-cliff cursor length in lockstep (typically 30);
+// 0 uses the default page size and disables truncation while keeping body
+// placement. page.first seeds the collective cursor with a list of already-seen
+// content IDs so iteration begins past them; empty (the default) starts from
+// the top of the feed.
 //
 // Example (featured feed):
 //
@@ -53,7 +54,7 @@ type pageConfig struct {
 //	  stop-after = 100
 //	}
 //
-// Example (collective with hardened pagination):
+// Example (collective with tail-cliff cursor truncation):
 //
 //	produce "ifunny-feed" "collective" {
 //	  auth-bearer = env.IFUNNY_BEARER
@@ -101,15 +102,15 @@ func produceFeed(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
 	}
 
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
-		// Collective with any paging knob set uses the hardened Collective()
-		// path: the cursor rides in the POST body (dodging the size cliff) and
-		// page.size couples the request page size (Limit) to the tail-cliff
-		// cursor length (TailPager), so an N-item page carries an N-ID cursor.
-		// Body placement matters when seeding a large page.first exclusion set,
-		// so any First also selects this path. Size 0 keeps the default page
-		// size and disables tail truncation but still posts in the body. Any
-		// other feed, or collective with no paging knobs, uses NamedFeed
-		// (default page size, verbatim cursor) — the historical behavior.
+		// Collective with any paging knob set uses Collective(): the cursor
+		// rides in the POST body (dodging the size cliff) and page.size couples
+		// the request page size (Limit) to the tail-cliff cursor length
+		// (TailPager), so an N-item page carries an N-ID cursor. Body placement
+		// matters when seeding a large page.first exclusion set, so any First
+		// also selects this path. Size 0 keeps the default page size and
+		// disables tail truncation but still posts in the body. Any other feed,
+		// or collective with no paging knobs, uses NamedFeed (default page size,
+		// verbatim cursor) — the historical behavior.
 		var feed compose.Feed
 		if config.Feed == "collective" && (config.Page.Size > 0 || len(config.Page.First) > 0) {
 			feed = compose.Collective(config.Page.Size)
