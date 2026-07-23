@@ -959,6 +959,146 @@ func timelineTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer
 	}, nil
 }
 
+// chatHistoryTransformer builds the ifunny-chat-history-explode transformer.
+// It explodes a chat channel into its message history, emitting each
+// ChatEvent as its own message. The shape is channel-reference → []message.
+// This is the transformer counterpart to the ifunny-chat-history producer:
+// same underlying chat.IterMessages walk (newest-to-oldest, terminates on
+// its own), but keyed off records flowing through the pipeline instead of
+// a single channel fixed at bind time.
+//
+// Keying: accept=string takes a bare channel name; accept=json takes a rich
+// object with a "name" field (the same shape ifunny-channels / ifunny-channel
+// emit). The optional limit field (0 = no limit) stops emission after the
+// Nth message per input channel.
+//
+// Requires auth-bearer: the chat WAMP handshake rejects anonymous (basic)
+// clients, same as the other chat resources.
+//
+// Example:
+//
+//	transform "ifunny-chat-history-explode" "backfill" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  accept = "string"
+//	  emit   = "json"
+//	  limit  = 500
+//	}
+func chatHistoryTransformer(ctx context.Context, parse sdk.Parser) (sdk.Transformer, error) {
+	config := struct {
+		authConfig
+		acceptConfig
+		emitConfig
+		Limit int `psy:"limit"`
+	}{
+		acceptConfig: acceptConfig{Accept: "json"},
+		emitConfig:   emitConfig{Emit: "json"},
+	}
+	if err := parse(&config); err != nil {
+		return nil, err
+	}
+
+	if err := config.acceptConfig.Bind(); err != nil {
+		return nil, err
+	}
+	if err := config.emitConfig.Bind(); err != nil {
+		return nil, err
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	chat, err := client.Chat(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, in <-chan []byte, out chan<- []byte, errs chan<- error) {
+		defer close(out)
+
+		for msg := range in {
+			decoded, err := config.acceptConfig.Decode(msg)
+			if err != nil {
+				if !sendErr(ctx, errs, err) {
+					return
+				}
+				continue
+			}
+
+			var channel string
+			if config.acceptConfig.Sparse() {
+				ref, ok := decoded.(string)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-chat-history-explode: expected string ref, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				channel = ref
+			} else {
+				richIn, ok := decoded.(map[string]any)
+				if !ok {
+					if !sendErr(ctx, errs, fmt.Errorf("ifunny-chat-history-explode: expected map, got %T", decoded)) {
+						return
+					}
+					continue
+				}
+				if name, ok := richIn["name"].(string); ok {
+					channel = name
+				}
+			}
+
+			if channel == "" {
+				continue
+			}
+
+			count := 0
+		emit:
+			for r := range chat.IterMessages(ctx, compose.ListMessages(channel, 30, compose.NONE, 0)) {
+				if r.Err != nil {
+					if !sendErr(ctx, errs, r.Err) {
+						return
+					}
+					break
+				}
+				if r.V == nil {
+					break
+				}
+
+				var toEmit any
+				if config.emitConfig.Sparse() {
+					toEmit = r.V.ID
+				} else {
+					toEmit = r.V
+				}
+
+				b, err := config.emitConfig.Encode(toEmit)
+				if err != nil {
+					if !sendErr(ctx, errs, err) {
+						return
+					}
+					break
+				}
+
+				select {
+				case out <- b:
+					count++
+					if config.Limit > 0 && count >= config.Limit {
+						break emit
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}, nil
+}
+
 // commentsTransformer builds the ifunny-comments transformer. It explodes
 // a content identifier into the comment forest on that content, emitting
 // each comment (both top-level and replies) as its own message. The shape
