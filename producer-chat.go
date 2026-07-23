@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	ifunny "github.com/open-ifunny/ifunny-go"
 	"github.com/open-ifunny/ifunny-go/compose"
@@ -317,4 +318,148 @@ func produceChannels(ctx context.Context, parse sdk.Parser) (sdk.Producer, error
 	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
 		produceIter(ctx, client.IterChannelsQuery(ctx, config.Query), send, errs, &config.emitConfig)
 	}, nil
+}
+
+// chatListenAllConfig configures ifunny-chat-listen-all.
+type chatListenAllConfig struct {
+	authConfig
+	emitConfig
+	Channels []string `psy:"channels"`
+}
+
+// produceChatListenAll builds the ifunny-chat-listen-all producer. It streams
+// live events from multiple channels on a single WebSocket connection, emitting
+// each ChatEvent as raw bytes (default "json"). Unlike ifunny-chat-listen which
+// subscribes to a single channel, this resource takes a list of channel names
+// and subscribes to all of them, multiplexing events from all channels onto a
+// single output stream.
+//
+// A live subscription has no natural end, so bound the run with the host-owned
+// stop-after BlockMeta — the host's flow.Producer wrapper cancels ctx at the
+// cutoff and the producer unsubscribes cleanly via ctx.Done.
+//
+// Each subscription's callback feeds events to an internal channel; the
+// producer goroutine encodes and sends to output. A done channel lets
+// callbacks abandon a send the moment we stop, so a late event can never
+// block on a listener that has already gone away. Teardown unsubscribes
+// from all channels and closes channels in defer.
+//
+// Requires auth-bearer. Takes an emit spec (default "json").
+//
+// Example:
+//
+//	produce "ifunny-chat-listen-all" "multi" {
+//	  auth-bearer = env.IFUNNY_BEARER
+//	  user-agent {
+//	    device         = "android"
+//	    device-version = "14"
+//	  }
+//	  channels = ["chat.gaming", "chat.tech", "chat.memes"]
+//	  emit     = "json"
+//	}
+func produceChatListenAll(ctx context.Context, parse sdk.Parser) (sdk.Producer, error) {
+	config := &chatListenAllConfig{emitConfig: emitConfig{Emit: "json"}}
+	if err := parse(config); err != nil {
+		return nil, err
+	}
+
+	if err := config.emitConfig.Bind(); err != nil {
+		return nil, err
+	}
+
+	if len(config.Channels) == 0 {
+		return nil, fmt.Errorf("ifunny-chat-listen-all: channels list must not be empty")
+	}
+
+	client, err := clientFor(&config.authConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	chat, err := client.Chat(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return func(ctx context.Context, send chan<- []byte, errs chan<- error) {
+		multiplexChatListen(ctx, config.Channels, chat.OnChannelEvent, config.Encode, send, errs)
+	}, nil
+}
+
+// channelSubscriber mirrors (*ifunny.Chat).OnChannelEvent: it registers handle
+// for a channel's live events and returns an unsubscribe func. Factoring it out
+// lets multiplexChatListen be driven by a fake in tests.
+type channelSubscriber func(ctx context.Context, channel string, handle func(*ifunny.ChatEvent) error) (func(), error)
+
+// multiplexChatListen subscribes to every channel via subscribe, fans their
+// events onto send (encoded via encode), and tears down when ctx is cancelled.
+// Each subscription's callback blocks on the shared events channel or on done;
+// the producer goroutine below drains events and forwards them. A done channel
+// lets a callback abandon a send the moment we stop, so a late event can never
+// block on a listener that has already gone away.
+func multiplexChatListen(
+	ctx context.Context,
+	channels []string,
+	subscribe channelSubscriber,
+	encode func(any) ([]byte, error),
+	send chan<- []byte,
+	errs chan<- error,
+) {
+	defer close(send)
+
+	events := make(chan *ifunny.ChatEvent)
+	done := make(chan struct{})
+	var unsubscribes []func()
+
+	// Subscribe to all channels
+	for _, channel := range channels {
+		unsub, err := subscribe(ctx, channel, func(event *ifunny.ChatEvent) error {
+			select {
+			case events <- event:
+			case <-done:
+			}
+			return nil
+		})
+		if err != nil {
+			sendErr(ctx, errs, err)
+			// Release blocked callbacks before unsubscribing (see teardown
+			// below), then unsubscribe the channels we already subscribed to.
+			close(done)
+			for _, u := range unsubscribes {
+				u()
+			}
+			return
+		}
+		unsubscribes = append(unsubscribes, unsub)
+	}
+
+	defer func() {
+		// Release any callback blocked handing an event to the loop BEFORE
+		// unsubscribing. unsub() may be serviced on the connection's reader
+		// goroutine — the very goroutine that could be running a blocked
+		// callback — so unsubscribing first can wedge the two against each
+		// other. Closing done lets those callbacks return so unsub can't hang.
+		close(done)
+		for _, unsub := range unsubscribes {
+			unsub()
+		}
+	}()
+
+	for {
+		select {
+		case event := <-events:
+			b, err := encode(event)
+			if err != nil {
+				sendErr(ctx, errs, err)
+				return
+			}
+			select {
+			case send <- b:
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
