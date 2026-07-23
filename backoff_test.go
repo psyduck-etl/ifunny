@@ -41,6 +41,34 @@ func TestBackoffFor(t *testing.T) {
 	}
 }
 
+// TestBackoffForBounded guarantees the sleep is never unbounded: even with
+// jitter at its high extreme, and even for attempt counts far past the
+// ceiling, backoffFor stays at or below the jittered ceiling
+// (2s<<12 * 1.1 ~= 9011s) and never goes non-positive. Sampling attempts well
+// beyond backoffMaxShift guards the min() clamp — drop it and the raw
+// backoffBase<<attempt shift would grow until it overflows into a huge or
+// negative duration, which this test would catch.
+func TestBackoffForBounded(t *testing.T) {
+	ceiling := backoffBase << backoffMaxShift
+	maxJittered := time.Duration(float64(ceiling) * (1 + backoffJitter))
+	// The global floor: attempt 0 is the smallest interval, and jitter can
+	// only pull it down to backoffBase*(1-jitter) = 1.8s. That floor is low
+	// but strictly positive — a retry never fires back-to-back with no wait.
+	minFloor := time.Duration(float64(backoffBase) * (1 - backoffJitter))
+
+	for attempt := 0; attempt <= backoffMaxShift+64; attempt++ {
+		for range 100 {
+			got := backoffFor(attempt)
+			if got < minFloor {
+				t.Fatalf("backoffFor(%d) = %s below floor %s (want low but non-zero)", attempt, got, minFloor)
+			}
+			if got > maxJittered {
+				t.Fatalf("backoffFor(%d) = %s exceeds jittered ceiling %s", attempt, got, maxJittered)
+			}
+		}
+	}
+}
+
 // TestRetryTransportPassthrough: a non-429 response returns immediately with
 // no backoff.
 func TestRetryTransportPassthrough(t *testing.T) {
