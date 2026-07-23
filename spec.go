@@ -44,7 +44,7 @@ func clientSpecs() []*sdk.Spec {
 			Default:     "",
 		},
 		{
-			Name:        "giveup-retry-after",
+			Name:        "retry-giveup-after",
 			Description: "number of consecutive upstream-429 tries after which to give up and propagate the rate-limit error; 0 (default) retries with backoff indefinitely",
 			Type:        sdk.TypeInt,
 			Default:     0,
