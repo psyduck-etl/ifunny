@@ -34,11 +34,16 @@ const (
 // the transport's own errors — passes straight through untouched; this only
 // addresses upstream rate limiting.
 //
+// giveUpAfter bounds the retry: after that many consecutive 429 tries the
+// transport stops and returns the last 429 response so the caller sees the
+// rate-limit error. 0 keeps the retry unbounded.
+//
 // RoundTrip holds no mutable state, so a single retryTransport is safe to
 // share across the concurrent goroutines the iterator/fan-out transformers
 // spin up.
 type retryTransport struct {
-	base http.RoundTripper
+	base        http.RoundTripper
+	giveUpAfter uint
 }
 
 // backoffSleep is the sleep the retry loop uses between attempts. It is a
@@ -65,6 +70,13 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusTooManyRequests {
+			return resp, nil
+		}
+
+		// attempt+1 tries have now returned 429. If a give-up bound is set
+		// and we've reached it, hand the 429 back to the caller (body
+		// intact) instead of retrying further.
+		if t.giveUpAfter != 0 && uint(attempt+1) >= t.giveUpAfter {
 			return resp, nil
 		}
 
@@ -105,14 +117,14 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // retryingHTTPClient clones http.DefaultClient and wraps its transport in a
 // retryTransport, preserving the standard connection pool and timeouts while
-// adding transparent 429 backoff. Passed to ifunny client constructors via
-// ifunny.WithHTTPClient.
-func retryingHTTPClient() *http.Client {
+// adding transparent 429 backoff. giveUpAfter bounds the retry (0 =
+// unbounded). Passed to ifunny client constructors via ifunny.WithHTTPClient.
+func retryingHTTPClient(giveUpAfter uint) *http.Client {
 	base := http.DefaultClient.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
 	c := *http.DefaultClient
-	c.Transport = &retryTransport{base: base}
+	c.Transport = &retryTransport{base: base, giveUpAfter: giveUpAfter}
 	return &c
 }

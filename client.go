@@ -16,10 +16,16 @@ import (
 // the string "generate" (mint and prime a fresh one at bind time), or
 // "generate-cache" (mint once and cache in $XDG_CACHE_HOME so subsequent
 // runs skip the ~15s priming handshake).
+//
+// GiveupRetryAfter caps the transparent 429 backoff (see backoff.go): after
+// that many consecutive rate-limited tries the transport gives up and
+// propagates the 429 to the caller. 0 (the default) keeps the retry
+// unbounded.
 type authConfig struct {
-	AuthBasic  string           `psy:"auth-basic"`
-	AuthBearer string           `psy:"auth-bearer"`
-	UserAgent  *userAgentConfig `psy:"user-agent"`
+	AuthBasic        string           `psy:"auth-basic"`
+	AuthBearer       string           `psy:"auth-bearer"`
+	UserAgent        *userAgentConfig `psy:"user-agent"`
+	GiveupRetryAfter uint             `psy:"giveup-retry-after"`
 }
 
 // userAgentConfig is the block that renders every request's user-agent.
@@ -91,8 +97,9 @@ func defaultClientFor(config *authConfig) (*ifunny.Client, error) {
 
 	// Every constructed client retries upstream 429s with backoff (see
 	// backoff.go). One retrying http.Client is shared across the mint +
-	// make calls the basic path may issue.
-	opts := []ifunny.Option{ifunny.WithHTTPClient(retryingHTTPClient())}
+	// make calls the basic path may issue. GiveupRetryAfter bounds the
+	// retry (0 = unbounded).
+	opts := []ifunny.Option{ifunny.WithHTTPClient(retryingHTTPClient(config.GiveupRetryAfter))}
 
 	if config.AuthBearer != "" {
 		return ifunny.MakeClient(context.Background(), config.AuthBearer, ua, opts...)

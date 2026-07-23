@@ -102,6 +102,64 @@ func TestRetryTransportRetriesUntilSuccess(t *testing.T) {
 	}
 }
 
+// TestRetryTransportGivesUp: with giveUpAfter set, the transport stops after
+// that many consecutive 429 tries and propagates the 429 response to the
+// caller instead of retrying forever.
+func TestRetryTransportGivesUp(t *testing.T) {
+	defer restoreBackoffSleep()
+	slept := 0
+	backoffSleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	calls := 0
+	tr := &retryTransport{
+		giveUpAfter: 3,
+		base: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return resp(http.StatusTooManyRequests), nil
+		}),
+	}
+
+	r, err := tr.RoundTrip(newReq(t))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if r.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429 propagated after give-up", r.StatusCode)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3 (giveUpAfter)", calls)
+	}
+	// 3 tries → 2 sleeps between them; no sleep after the final give-up try.
+	if slept != 2 {
+		t.Fatalf("slept = %d, want 2", slept)
+	}
+}
+
+// TestRetryTransportGiveUpAfterOne: giveUpAfter=1 means a single try — a 429
+// propagates immediately with no backoff.
+func TestRetryTransportGiveUpAfterOne(t *testing.T) {
+	defer restoreBackoffSleep()
+	slept := 0
+	backoffSleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	calls := 0
+	tr := &retryTransport{
+		giveUpAfter: 1,
+		base: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls++
+			return resp(http.StatusTooManyRequests), nil
+		}),
+	}
+
+	r, err := tr.RoundTrip(newReq(t))
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if r.StatusCode != http.StatusTooManyRequests || calls != 1 || slept != 0 {
+		t.Fatalf("status=%d calls=%d slept=%d, want 429/1/0", r.StatusCode, calls, slept)
+	}
+}
+
 // TestRetryTransportContextCancel: a cancelled context during backoff aborts
 // the retry loop and surfaces the ctx error rather than looping forever.
 func TestRetryTransportContextCancel(t *testing.T) {
