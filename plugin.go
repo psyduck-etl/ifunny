@@ -209,6 +209,23 @@ func Plugin() sdk.Plugin {
 			),
 		},
 		&sdk.Resource{
+			Name:            "ifunny-chat-listen-all",
+			Kinds:           sdk.PRODUCER,
+			ProvideProducer: produceChatListenAll,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "channels",
+					Description: "list of channel names to listen to live events on",
+					Type:        sdk.TypeList,
+					Required:    true,
+					ElemType: &sdk.Spec{
+						Type: sdk.TypeString,
+					},
+				},
+				emitSpec(),
+			),
+		},
+		&sdk.Resource{
 			Name:            "ifunny-chat-invites",
 			Kinds:           sdk.PRODUCER,
 			ProvideProducer: produceChatInvites,
@@ -288,6 +305,21 @@ func Plugin() sdk.Plugin {
 				&sdk.Spec{
 					Name:        "limit",
 					Description: "maximum number of content items to emit per input user (0 = no limit)",
+					Type:        sdk.TypeInt,
+					Default:     "0",
+				},
+				acceptSpec(),
+				emitSpec(),
+			),
+		},
+		&sdk.Resource{
+			Name:               "ifunny-chat-history-explode",
+			Kinds:              sdk.TRANSFORMER,
+			ProvideTransformer: chatHistoryTransformer,
+			Spec: specs(
+				&sdk.Spec{
+					Name:        "limit",
+					Description: "maximum number of messages to emit per input channel (0 = no limit)",
 					Type:        sdk.TypeInt,
 					Default:     "0",
 				},
